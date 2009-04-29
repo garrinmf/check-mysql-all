@@ -20,7 +20,7 @@ use utils qw(%ERRORS);
 
 my $VERSION = '0.0.3';
 my @checks = qw(connect repl_io repl_sql repl_sbm repl_all 
-                mysql_query connections);
+                mysql_query connections table_status);
 my @repl_checks = qw(repl_io repl_sql repl_sbm repl_all);
 
 ################################################################################
@@ -191,9 +191,7 @@ if (grep {m|^$check$|} @repl_checks) {
 }
 
 # Non-replication checks
-my $processlist = $dbh->selectall_hashref('SHOW FULL PROCESSLIST', 1);
-my $variables   = $dbh->selectall_hashref('SHOW GLOBAL VARIABLES', 1);
-my $status      = $dbh->selectall_hashref('SHOW /*!50002 GLOBAL */ STATUS', 1);
+my ($processlist, $variables, $status, $dbs) = get_db_info();
 
 # Mysql query check
 if ($check eq 'mysql_query') {
@@ -249,6 +247,45 @@ if ($check eq 'mysql_query') {
     print "OK: $processes/$mc ($pcnt_used%) connections are used\n";
     exit $ERRORS{'OK'};
 
+# Table status check
+} elsif ($check eq 'table_status') {
+    # Get dbs to check
+    my @dbs = $options{'database'} ? ($options{'database'}) : @{ $dbs };
+
+    my %tables_status;
+    eval {
+        for my $db (@$dbs) {
+            $tables_status{$db} = $dbh->selectall_hashref("SHOW TABLE STATUS FROM \`$db\`", 1);
+        }
+    };
+    if ($@) {
+        print "UNKNOWN: Unable to get table status data\n";
+        print "Errno: $dbh->{'mysql_errno'}\n" if ($options{'verbose'} gt 1);
+        print "Error: $dbh->{'mysql_error'}\n" if ($options{'verbose'} gt 2);
+        print $@ if ($options{verbose} gt 2);
+        exit $ERRORS{'UNKNOWN'};
+    }
+
+    my @errs;
+    for my $db (sort(keys(%tables_status))) {
+        for my $table (sort(keys(%{ $tables_status{$db} }))) {
+            $_ = $tables_status{$db}{$table}{'Comment'};
+	    if (/marked as crashed/) {
+	        push(@errs, "$db.$table marked as crashed");
+            } elsif (/(err(?:code|no):\s\d+)/i) {
+	        push(@errs, "$db.$table has an error ($1)");
+	    }
+	}
+    }
+
+    if (@errs) {
+        print 'CRITICAL: ', join(',', @errs), "\n";
+	exit $ERRORS{'CRITICAL'};
+    }
+
+    print "OK: No errors found on any tables\n";
+    exit $ERRORS{'OK'};
+ 
 # Locks (?) check
 } elsif ($check eq 'locks') {
     print "UNKNOWN: This feature is not yet implemented\n";
@@ -329,14 +366,44 @@ sub validate_opt {
 
 # Return slave status info
 sub get_slave_status {
-    my $r = $dbh->selectall_hashref('SHOW SLAVE STATUS', 1);
-
+    my $r;
+    eval {
+        $r = $dbh->selectall_hashref('SHOW SLAVE STATUS', 1);
+    };
+    if ($@) {
+        print "UNKNOWN: Unable to get slave status\n";
+        print "Errno: $dbh->{'mysql_errno'}\n" if ($options{'verbose'} gt 1);
+        print "Error: $dbh->{'mysql_error'}\n" if ($options{'verbose'} gt 2);
+        print $@ if ($options{verbose} gt 2);
+        exit $ERRORS{'UNKNOWN'};
+    }
+ 
     if (! %{$r}) {
         print "CRITICAL: Slave Not Configured\n";
         exit $ERRORS{'CRITICAL'};
     }
 
     return ( values(%{ $r }) )[0];
+}
+
+# Return db info
+sub get_db_info {
+    my ($processlist, $variables, $status, $dbs);
+    eval {
+        $processlist = $dbh->selectall_hashref('SHOW FULL PROCESSLIST', 1);
+        $variables   = $dbh->selectall_hashref('SHOW GLOBAL VARIABLES', 1);
+        $status      = $dbh->selectall_hashref('SHOW /*!50002 GLOBAL */ STATUS', 1);
+        $dbs         = $dbh->selectcol_arrayref("SHOW DATABASES");
+    };
+    if ($@) {
+        print "UNKNOWN: Unable to get db info\n";
+        print "Errno: $dbh->{'mysql_errno'}\n" if ($options{'verbose'} gt 1);
+        print "Error: $dbh->{'mysql_error'}\n" if ($options{'verbose'} gt 2);
+        print $@ if ($options{verbose} gt 2);
+        exit $ERRORS{'UNKNOWN'};
+    }
+ 
+    return ($processlist, $variables, $status, $dbs);
 }
 
 =pod
@@ -347,7 +414,7 @@ check_mysql - Nagios checks for 4.1+ versions of MySQL
 
 =head1 SYNOPSIS
 
- check_mysql check_name [options]
+ check_mysql <check_name> [options]
 
  Options:
    --args|a     Optional arguments.  Comma-separated.  Check-specific.
@@ -362,7 +429,7 @@ check_mysql - Nagios checks for 4.1+ versions of MySQL
    --version|V  Display version information and exit
    --warning|w  The level at which a warning is raised.  Check-specific.
 
- defaults are:
+ Defaults are:
 
  ATTRIBUTE                  VALUE
  -------------------------- ------------------
@@ -378,6 +445,10 @@ check_mysql - Nagios checks for 4.1+ versions of MySQL
  verbose                    1 (out of 3)
  version                    FALSE
  warning                    Check-specific
+
+ The following checks are supported:
+
+ connect repl_io repl_sql repl_sbm repl_all mysql_query connections table_status
 
 =head1 CHECKS
 
@@ -396,7 +467,7 @@ Returns CRITICAL if not able to connect, OK otherwise.
 
 Checks whether on not the IO Replication thread is running.
 Returns CRITICAL if not running, OK otherwise.
-    Permissions required: USAGE, REPLICATION CLIENT
+    Permissions required: REPLICATION CLIENT
     I<--args> => ignored
     I<--warning> => ignored
     I<--critical> => ignored
@@ -405,7 +476,7 @@ Returns CRITICAL if not running, OK otherwise.
 
 Check to see whether or not the SQL Replication thread is running.
 Returns CRITICAL if not running, OK otherwise.
-    Permissions required: USAGE, REPLICATION CLIENT
+    Permissions required: REPLICATION CLIENT
     I<--args> => ignored
     I<--warning> => ignored
     I<--critical> => ignored
@@ -413,7 +484,7 @@ Returns CRITICAL if not running, OK otherwise.
 =item B<repl_sbm>
 
 Check how many seconds behind the master the slave is.
-    Permissions required: USAGE, REPLICATION CLIENT
+    Permissions required: REPLICATION CLIENT
     I<--args> => ignored
     I<--warning> => default 30 seconds
     I<--critical> => default 60 seconds
@@ -424,7 +495,7 @@ Combine repl_io, repl_sql, and repl_sbm checks into one.
 Returns CRITICAL on failure of IO or SQL threads or if seconds behind master is 
 greater than the limit.
 Returns WARNING only if seconds behind master is greater than the limit.
-    Permissions required: USAGE, REPLICATION CLIENT
+    Permissions required: REPLICATION CLIENT
     I<--args> => ignored
     I<--warning> => default 30 seconds
     I<--critical> => default 60 seconds
@@ -434,7 +505,7 @@ Returns WARNING only if seconds behind master is greater than the limit.
 Run a given query, test if it executes properly.
 Returns CRITICAL if the query fails to execute for whatever reason, OK 
 otherwise.
-    Permissions required: USAGE, depends on the query
+    Permissions required: depends on the query
     I<--args> => no default, see Examples for usage
     I<--warning> => ignored
     I<--critical> => ignored
@@ -442,10 +513,19 @@ otherwise.
 =item B<connections>
 
 Test if the percentage of used connections is over a given threshold.
-    Permissions required: USAGE, PROCESS
+    Permissions required: PROCESS
     I<--args> => ignored
     I<--warning> => default 80%
     I<--critical> => default 90%
+
+=item B<table_status>
+
+Test all tables in a given database for errors, or all tables in all databases 
+if I<--database> is not given.
+    Permissions required: SELECT
+    I<--args> => ignored
+    I<--warning> => ignored
+    I<--critical> => ignored
 
 =back
 
