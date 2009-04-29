@@ -410,7 +410,7 @@ sub get_db_info {
 
 =head1 NAME
 
-check_mysql_all - Nagios checks for 4.1+ versions of MySQL
+check_mysql_all - Nagios checks for 4.0+ versions of MySQL
 
 =head1 SYNOPSIS
 
@@ -506,7 +506,7 @@ Run a given query, test if it executes properly.
 Returns CRITICAL if the query fails to execute for whatever reason, OK 
 otherwise.
     Permissions required: depends on the query
-    I<--args> => no default, see Examples for usage
+    I<--args> => no default, specify query with C<query=...> and optionally query timeout with C<query_timeout=...>
     I<--warning> => ignored
     I<--critical> => ignored
 
