@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 ################################################################################
-# check_mysql - Nagios Plug-In for typical MySQL checks. 4.0+
+# check_mysql_all - Nagios Plug-In for typical MySQL checks. 4.0+
 #
 # @author  Ryan Lowe <ryan.a.lowe@percona.com
 # @date    2009-03-06
@@ -410,11 +410,11 @@ sub get_db_info {
 
 =head1 NAME
 
-check_mysql - Nagios checks for 4.1+ versions of MySQL
+check_mysql_all - Nagios checks for 4.1+ versions of MySQL
 
 =head1 SYNOPSIS
 
- check_mysql <check_name> [options]
+ check_mysql_all <check_name> [options]
 
  Options:
    --args|a     Optional arguments.  Comma-separated.  Check-specific.
@@ -531,7 +531,7 @@ if I<--database> is not given.
 
 =head1 SYSTEM REQUIREMENTS
 
-check_mysql requires the following Perl modules:
+check_mysql_all requires the following Perl modules:
 
   Pod::Usage
   Getopt::Long
@@ -568,7 +568,7 @@ Ryan Lowe (rlowe@pablowe.net)
 
 =head1 VERSION
 
-This manual page documents 0.0.3 of check_mysql
+This manual page documents 0.0.3 of check_mysql_all
 
 =cut
 
