@@ -1,0 +1,494 @@
+#!/usr/bin/perl
+
+################################################################################
+# check_mysql - Nagios Plug-In for typical MySQL checks. 4.0+
+#
+# @author  Ryan Lowe <ryan.a.lowe@percona.com
+# @date    2009-03-06
+# @license GPL v2
+################################################################################
+
+use strict;
+use warnings FATAL => 'all';
+use Pod::Usage;
+use Getopt::Long;
+use English qw(-no_match_vars);
+use DBI;
+use lib "/usr/local/nagios/libexec";
+use lib "/usr/lib64/nagios/plugins";
+use utils qw(%ERRORS);
+
+my $VERSION = '0.0.3';
+my @checks = qw(connect repl_io repl_sql repl_sbm repl_all 
+                mysql_query connections);
+my @repl_checks = qw(repl_io repl_sql repl_sbm repl_all);
+
+################################################################################
+# Get configuration information
+################################################################################
+
+# Parse command line opts
+my %options;
+my @args;
+my $gop=new Getopt::Long::Parser;
+$gop->configure('no_ignore_case','bundling');
+if (!$gop->getoptions(
+    '<>'           => \&validate_check,
+    'args|a=s'     => \@args,
+    'critical|c=s' => \$options { 'critical' },
+    'database|d=s' => \$options { 'database' },
+    'help|h'       => \$options { 'help'     },
+    'hostname|H=s' => \$options { 'host'     },
+    'password|p=s' => \$options { 'password' },
+    'port=s'       => \$options { 'port'     },
+    'timeout=i'    => \$options { 'timeout'  },
+    'username|u=s' => \$options { 'user'     },
+    'verbose|v+'   => \$options { 'verbose'  },
+    'version|V'    => \$options { 'version'  },
+    'warning|w=s'  => \$options { 'warning'  } ) ) {
+
+    pod2usage(2);
+}
+
+# Help if asked for or no check given
+pod2usage(2) if ($options{'help'});
+pod2usage(2) if (!$options{'check'});
+
+# Yay for versions
+if ($options{'version'}) {
+    print "$VERSION\n";
+    exit $ERRORS{'OK'};
+}
+
+# Set global defaults/validate options
+$options{'timeout'} = $options{'timeout'} ? $options{'timeout'} : 10;
+$options{'verbose'} = $options{'verbose'} ? $options{'verbose'} : 1;
+validate_opt(\%options, 'timeout', 'seconds');
+
+# Parse args string(s)
+my %args = map({ ($a,$b) = split(/\s*=\s*/,$_,2); $a => $b} @args);
+
+################################################################################
+# Begin the main program
+################################################################################
+
+# Set db defaults/validate options
+$options{'host'}     = $options{'host'}     ? $options{'host'}     : 'localhost';
+$options{'port'}     = $options{'port'}     ? $options{'port'}     : '3306';
+validate_opt(\%options, 'host', 'hostname');
+validate_opt(\%options, 'port', 'port');
+
+# Attempt db connection
+my $connection_string  = 'DBI:mysql:';
+$connection_string    .= "host=$options{'host'};";
+$connection_string    .= "database=$options{'database'};"
+    if $options { 'database' };
+$connection_string    .= "port=$options{'port'};";
+$connection_string    .= "mysql_multi_statements=1";
+my $dbh;
+eval {
+    local $SIG{ALRM} = sub { die 'TIMEOUT' };
+    alarm($options{'timeout'});
+
+    $dbh = DBI->connect ( 
+        $connection_string,
+        $options { 'user' },
+        $options { 'password' },
+        { RaiseError => 1, PrintError => 0 } 
+    );
+    alarm(0);
+};
+alarm(0);
+
+# Check for timeout
+if ( $@ ) {
+    print "CRITICAL: Could not connect to MySQL";
+    print " in $options{'timeout'} seconds" if ($@ eq "TIMEOUT");
+    print "\n";
+    print $@ if ($options{'verbose'} gt 2);
+    exit $ERRORS{'CRITICAL'};
+}
+
+################################################################################
+# Begin check processing
+################################################################################
+
+my $check = $options{'check'};
+
+# Connect check
+if ( $check eq 'connect' ) {
+    print "OK: MySQL is accepting connections\n";
+    $dbh->disconnect();
+    exit $ERRORS{'OK'};
+}
+
+# Replication checks
+if (grep {m|^$check$|} @repl_checks) {
+    my $repl_status = get_slave_status();
+
+    # Check IO thread
+    if ($check eq 'repl_io' or $check eq 'repl_all') {
+        if (uc($repl_status->{'Slave_IO_Running'}) ne 'YES') {
+            print "CRITICAL: IO_Thread Not Running\n";
+            print "Last Errno: $repl_status->{'Last_Errno'}\n" if ($options{'verbose'} gt 1);
+            print "Last Error: $repl_status->{'Last_Error'}\n" if ($options{'verbose'} gt 2);
+            exit $ERRORS{'CRITICAL'};
+        } 
+
+        unless ($check eq 'repl_all') {
+            print "OK: IO_Thread Running\n";
+            exit $ERRORS{'OK'};
+        }
+    } 
+    
+    # Check SQL thread
+    if ($check eq 'repl_sql' or $check eq 'repl_all') {
+        if (uc($repl_status->{'Slave_SQL_Running'}) ne 'YES') {
+            print "CRITICAL: SQL_Thread Not Running\n";
+            print "Last Errno: $repl_status->{'Last_Errno'}\n" if ($options{'verbose'} gt 1);
+            print "Last Error: $repl_status->{'Last_Error'}\n" if ($options{'verbose'} gt 2);
+            exit $ERRORS{'CRITICAL'};
+        } 
+
+        unless ($check eq 'repl_all') {
+            print "OK: SQL_Thread Running\n";
+            exit $ERRORS{'OK'};
+        }
+    } 
+
+    # Check seconds behind master
+    my $sbm;
+    if ($check eq 'repl_sbm' or $check eq 'repl_all') {
+        $options{'warning'} = $options{'warning'} ? $options{'warning'} : 30;
+        $options{'critical'} = $options{'critical'} ? $options{'critical'} : 60;
+        validate_opt(\%options, 'warning', 'seconds');
+        validate_opt(\%options, 'critical', 'seconds');
+
+        $sbm = $repl_status->{'Seconds_Behind_Master'};
+
+        if ($sbm gt $options{'critical'}) {
+            print "CRITICAL: Slave is $sbm seconds behind master\n";
+            exit $ERRORS{'CRITICAL'};
+        } elsif ($sbm gt $options{'warning'}) {
+            print "WARNING: Slave is $sbm seconds behind master\n";
+            exit $ERRORS{'WARNING'};
+        } elsif (!$sbm && $sbm ne '0') {
+            print "CRITICAL: Seconds Behind Master is NULL\n";
+            print "Last Errno: $repl_status->{'Last_Errno'}\n" if ($options{'verbose'} gt 1);
+            print "Last Error: $repl_status->{'Last_Error'}\n" if ($options{'verbose'} gt 2);
+            exit $ERRORS{'CRITICAL'};
+        }
+
+        unless ($check eq 'repl_all') {
+            print "OK: Slave is $sbm seconds behind master\n";
+            exit $ERRORS{'OK'};
+        }
+    }
+
+    # Must be repl_all check, everything must be OK
+    print "OK: IO and SQL Threads are running, slave is $sbm seconds behind master\n";
+    exit $ERRORS{'OK'};
+}
+
+# Non-replication checks
+my $processlist = $dbh->selectall_hashref('SHOW FULL PROCESSLIST', 1);
+my $variables   = $dbh->selectall_hashref('SHOW GLOBAL VARIABLES', 1);
+my $status      = $dbh->selectall_hashref('SHOW /*!50002 GLOBAL */ STATUS', 1);
+
+# Mysql query check
+if ($check eq 'mysql_query') {
+    # Validate args
+    if (!$args{'query'}) {
+        print "CRITICAL: No Query Provided\n";
+        exit $ERRORS{'CRITICAL'};
+    }
+    $args{'query_timeout'} = $args{'query_timeout'} ? $args{'query_timeout'} : 30;
+
+    # Attempt query
+    eval { 
+        local $SIG{ALRM} = sub { die 'TIMEOUT' };
+        alarm($args{'query_timeout'});
+
+        my $r = $dbh->selectall_hashref($args{'query'}, 1); 
+        alarm(0);
+    };
+    alarm(0);
+
+    if ($@) {
+        print 'CRITICAL: Query did not complete successfully';
+        print " in $args{'query_timeout'} seconds" if ($@ eq 'TIMEOUT');
+        print "\n";
+        print "Errno: $dbh->{'mysql_errno'}\n" if ($options{'verbose'} gt 1);
+        print "Error: $dbh->{'mysql_error'}\n" if ($options{'verbose'} gt 2);
+        print $@ if ($options{verbose} gt 2);
+        exit $ERRORS{'CRITICAL'};
+    }
+    
+    print "OK: Query Executed Successfully\n";
+    exit $ERRORS{'OK'};
+
+# Connection usage check
+} elsif ($check eq 'connections') {
+    $options{'warning'} = $options{'warning'} ? $options{'warning'} : 80;
+    $options{'critical'} = $options{'critical'} ? $options{'critical'} : 90;
+    validate_opt(\%options, 'warning', 'percent');
+    validate_opt(\%options, 'critical', 'percent');
+
+    my $processes = scalar keys %{$processlist};
+    my $mc        = $variables->{'max_connections'}->{'Value'};
+    my $pcnt_used = int($processes*100/$mc + 0.5); # Round to nearest percent
+
+    if ($pcnt_used >= $options{'critical'}) {
+        print "CRITICAL: $processes/$mc ($pcnt_used%) connections are used\n";
+        exit $ERRORS{'CRITICAL'};
+    } elsif ($pcnt_used >= $options{'warning'}) {
+        print "WARNING: $processes/$mc ($pcnt_used%) connections are used\n";
+        exit $ERRORS{'WARNING'};
+    }
+
+    print "OK: $processes/$mc ($pcnt_used%) connections are used\n";
+    exit $ERRORS{'OK'};
+
+# Locks (?) check
+} elsif ($check eq 'locks') {
+    print "UNKNOWN: This feature is not yet implemented\n";
+    exit $ERRORS{'UNKNOWN'};
+}
+
+# Shouldn't get here...
+print "UNKNOWN: Internal error, unrecognized check\n";
+exit $ERRORS{'UNKNOWN'};
+
+################################################################################
+# Subroutines and helpers
+################################################################################
+
+# Validate check argument
+sub validate_check {
+    my $check = lc(shift);
+
+    # Check for multiple checks
+    if (exists($options{'check'})) {
+        print "UNKNOWN: Only one check can be executed at a time\n";
+        exit $ERRORS{'UNKNOWN'};
+    }
+
+    # Verify valid check
+    unless (grep {m|^$check$|} @checks) { 
+        print "UNKNOWN: Check $check is unrecognized\n";
+        exit $ERRORS{'UNKNOWN'};
+    }
+
+    $options{'check'} = $check;
+}
+
+# Validate options
+sub validate_opt {
+    my ($options, $opt, $type) = @_;
+
+    # Percents - positive integers 0-100 optionally ending in '%'
+    if ($type eq 'percent') {
+        $options->{$opt} =~ s/\%$//;
+        if ($options->{$opt} =~ /\D/) {
+            print "UNKNOWN: Option '$opt' should contain a positive integer (in percent)\n";
+            exit $ERRORS{'UNKNOWN'};
+        }
+        unless ($options->{$opt} <= 100) {
+            print "UNKNOWN: Option '$opt' should be within 0-100%";
+            exit $ERRORS{'UNKNOWN'};
+        }
+
+    # Seconds - positive intgers optionally ending in 's'
+    } elsif ($type eq 'seconds') {
+        $options->{$opt} =~ s/s$//;
+        if ($options->{$opt} =~ /\D/) {
+            print "UNKNOWN: Option '$opt' should contain a positive integer (in seconds)\n";
+            exit $ERRORS{'UNKNOWN'};
+        }
+
+    # Port - positive integers
+    } elsif ($type eq 'port') {
+        if ($options->{$opt} =~ /\D/) {
+            print "UNKNOWN: Option '$opt' should contain a TCP port\n";
+            exit $ERRORS{'UNKNOWN'};
+        }
+
+    # Host - any string only containing \w, '-', '.'
+    } elsif ($type eq 'hostname') {
+        unless ($options->{$opt} =~ /^[\w\-\.]+$/) {
+            print "UNKNOWN: Option '$opt' should contain a valid hostname\n";
+            exit $ERRORS{'UNKNOWN'};
+        }
+
+    # Uh oh...
+    } else {
+        print "UNKNOWN: Internal error, unable to verify option $opt\n";
+        exit $ERRORS{'UNKNOWN'};
+    }
+}
+
+# Return slave status info
+sub get_slave_status {
+    my $r = $dbh->selectall_hashref('SHOW SLAVE STATUS', 1);
+
+    if (! %{$r}) {
+        print "CRITICAL: Slave Not Configured\n";
+        exit $ERRORS{'CRITICAL'};
+    }
+
+    return ( values(%{ $r }) )[0];
+}
+
+=pod
+
+=head1 NAME
+
+check_mysql - Nagios checks for 4.1+ versions of MySQL
+
+=head1 SYNOPSIS
+
+ check_mysql check_name [options]
+
+ Options:
+   --args|a     Optional arguments.  Comma-separated.  Check-specific.
+   --critical|c The level at which a critical alarm is raised.  Check-specific.
+   --database   The database to use
+   --help|h     Display this message and exit
+   --host|H     The target MySQL server host
+   --password|p The password of the MySQL user
+   --port       The port MySQL is listening on
+   --username|u The MySQL user used to connect
+   --verbose|v  Increase verbosity level
+   --version|V  Display version information and exit
+   --warning|w  The level at which a warning is raised.  Check-specific.
+
+ defaults are:
+
+ ATTRIBUTE                  VALUE
+ -------------------------- ------------------
+ args                       No default value
+ critical                   Check-specific
+ database                   No default value
+ help                       FALSE
+ host                       localhost
+ password                   No default value
+ port                       3306
+ timeout                    10 seconds
+ username                   No default value
+ verbose                    1 (out of 3)
+ version                    FALSE
+ warning                    Check-specific
+
+=head1 CHECKS
+
+=over
+
+=item B<connect>
+
+Checks connectivity to the target database server.
+Returns CRITICAL if not able to connect, OK otherwise.
+    Permissions required: USAGE
+    I<--args> => ignored
+    I<--warning> => ignored
+    I<--critical> => ignored
+
+=item B<repl_io>
+
+Checks whether on not the IO Replication thread is running.
+Returns CRITICAL if not running, OK otherwise.
+    Permissions required: USAGE, REPLICATION CLIENT
+    I<--args> => ignored
+    I<--warning> => ignored
+    I<--critical> => ignored
+
+=item B<repl_sql>
+
+Check to see whether or not the SQL Replication thread is running.
+Returns CRITICAL if not running, OK otherwise.
+    Permissions required: USAGE, REPLICATION CLIENT
+    I<--args> => ignored
+    I<--warning> => ignored
+    I<--critical> => ignored
+
+=item B<repl_sbm>
+
+Check how many seconds behind the master the slave is.
+    Permissions required: USAGE, REPLICATION CLIENT
+    I<--args> => ignored
+    I<--warning> => default 30 seconds
+    I<--critical> => default 60 seconds
+
+=item B<repl_all>
+
+Combine repl_io, repl_sql, and repl_sbm checks into one.
+Returns CRITICAL on failure of IO or SQL threads or if seconds behind master is 
+greater than the limit.
+Returns WARNING only if seconds behind master is greater than the limit.
+    Permissions required: USAGE, REPLICATION CLIENT
+    I<--args> => ignored
+    I<--warning> => default 30 seconds
+    I<--critical> => default 60 seconds
+
+=item B<mysql_query>
+
+Run a given query, test if it executes properly.
+Returns CRITICAL if the query fails to execute for whatever reason, OK 
+otherwise.
+    Permissions required: USAGE, depends on the query
+    I<--args> => no default, see Examples for usage
+    I<--warning> => ignored
+    I<--critical> => ignored
+
+=item B<connections>
+
+Test if the percentage of used connections is over a given threshold.
+    Permissions required: USAGE, PROCESS
+    I<--args> => ignored
+    I<--warning> => default 80%
+    I<--critical> => default 90%
+
+=back
+
+=head1 SYSTEM REQUIREMENTS
+
+check_mysql requires the following Perl modules:
+
+  Pod::Usage
+  Getopt::Long
+  DBI
+  DBD::mysql
+
+=head1 BUGS
+
+Please report all bugs and feature requests to 
+http://code.google.com/p/check-mysql
+
+=head1 LICENSE
+
+This program is copyright (c) 2008 Ryan Lowe.
+Feedback and improvements are welcome (rlowe@pablowe.net).
+
+THIS PROGRAM IS PROVIDED "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED
+WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
+MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+
+This program is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 2; OR the Perl Artistic License.  On UNIX and similar
+systems, you can issue `man perlgpl' or `man perlartistic' to read these
+licenses.
+
+You should have received a copy of the GNU General Public License along with
+this program; if not, write to the Free Software Foundation, Inc., 59 Temple
+Place, Suite 330, Boston, MA  02111-1307 USA.
+
+=head1 AUTHOR
+
+Ryan Lowe (rlowe@pablowe.net)
+
+=head1 VERSION
+
+This manual page documents 0.0.3 of check_mysql
+
+=cut
+
