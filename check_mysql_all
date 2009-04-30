@@ -33,15 +33,16 @@ my %ARGS;
 my $gop=new Getopt::Long::Parser;
 $gop->configure('no_ignore_case','bundling');
 if (!$gop->getoptions(
-    '<>'           => \&validate_check,
     'args|a=s%'    => \%ARGS,
+    'check|K=s'    => \$OPTIONS{'check'   },
     'critical|c=s' => \$OPTIONS{'critical'},
     'database|d=s' => \$OPTIONS{'database'},
     'help|h'       => \$OPTIONS{'help'    },
     'hostname|H=s' => \$OPTIONS{'host'    },
     'password|p=s' => \$OPTIONS{'password'},
-    'port=s'       => \$OPTIONS{'port'    },
-    'timeout=i'    => \$OPTIONS{'timeout' },
+    'port=i'       => \$OPTIONS{'port'    },
+    'socket|s=s'   => \$OPTIONS{'socket'  },
+    'timeout|t=i'  => \$OPTIONS{'timeout' },
     'username|u=s' => \$OPTIONS{'user'    },
     'verbose|v+'   => \$OPTIONS{'verbose' },
     'version|V'    => \$OPTIONS{'version' },
@@ -58,6 +59,12 @@ pod2usage(2) unless ($OPTIONS{'check'});
 if ($OPTIONS{'version'}) {
     print "$VERSION\n";
     exit $ERRORS{'OK'};
+}
+
+# Verify valid check
+unless (grep {/^$OPTIONS{'check'}$/} @CHECKS) { 
+    print "UNKNOWN: Check $OPTIONS{'check'} is unrecognized\n";
+    exit $ERRORS{'UNKNOWN'};
 }
 
 # Set global defaults/validate options
@@ -84,6 +91,8 @@ my $connection_string  = 'DBI:mysql:';
 $connection_string    .= "host=$OPTIONS{'host'};";
 $connection_string    .= "database=$OPTIONS{'database'};"
     if $OPTIONS{'database'};
+$connection_string    .= "mysql_socket=$OPTIONS{'socket'};"
+    if $OPTIONS{'socket'} and $OPTIONS{'host'} eq 'localhost';
 $connection_string    .= "port=$OPTIONS{'port'};";
 $connection_string    .= "mysql_multi_statements=1";
 my $dbh;
@@ -139,26 +148,6 @@ exit $ERRORS{'UNKNOWN'};
 # Subroutines and helpers
 ################################################################################
 
-# Validate check argument
-sub validate_check {
-    my $check = lc(shift);
-
-    # Check for multiple checks
-    if (exists($OPTIONS{'check'})) {
-        print "UNKNOWN: Only one check can be executed at a time\n";
-        exit $ERRORS{'UNKNOWN'};
-    }
-
-    # Verify valid check
-    unless (grep {m|^$check$|} @CHECKS) { 
-        print "UNKNOWN: Check $check is unrecognized\n";
-        exit $ERRORS{'UNKNOWN'};
-    }
-
-    # I don't like playing with globals in a sub, but not much choice
-    $OPTIONS{'check'} = $check;
-}
-
 # Validate user input
 sub validate_input {
     my ($hash, $key, $type) = @_;
@@ -210,10 +199,18 @@ sub get_slave_status {
 
     my $r;
     eval {
+        local $SIG{ALRM} = sub { die 'TIMEOUT' };
+        alarm($OPTIONS{'timeout'});
+
         $r = $dbh->selectall_hashref('SHOW SLAVE STATUS', 1);
+        alarm(0);
     };
+    alarm(0);
+
     if ($@) {
-        print "UNKNOWN: Unable to get slave status\n";
+        print "UNKNOWN: Unable to get slave status";
+        print " in $OPTIONS{'timeout'} seconds" if ($@ eq "TIMEOUT");
+        print "\n";
         print "Errno: $dbh->{'mysql_errno'}\n" if ($opts->{'verbose'} > 1);
         print "Error: $dbh->{'mysql_error'}\n" if ($opts->{'verbose'} > 2);
         print $@ if ($opts->{verbose} > 2);
@@ -234,13 +231,21 @@ sub get_db_info {
 
     my ($processlist, $variables, $status, $dbs);
     eval {
+        local $SIG{ALRM} = sub { die 'TIMEOUT' };
+        alarm($OPTIONS{'timeout'});
+
         $processlist = $dbh->selectall_hashref('SHOW FULL PROCESSLIST', 1);
         $variables   = $dbh->selectall_hashref('SHOW GLOBAL VARIABLES', 1);
         $status      = $dbh->selectall_hashref('SHOW /*!50002 GLOBAL */ STATUS', 1);
         $dbs         = $dbh->selectcol_arrayref("SHOW DATABASES");
+        alarm(0);
     };
+    alarm(0);
+
     if ($@) {
-        print "UNKNOWN: Unable to get db info\n";
+        print "UNKNOWN: Unable to get db info";
+        print " in $OPTIONS{'timeout'} seconds" if ($@ eq "TIMEOUT");
+        print "\n";
         print "Errno: $dbh->{'mysql_errno'}\n" if ($opts->{'verbose'} > 1);
         print "Error: $dbh->{'mysql_error'}\n" if ($opts->{'verbose'} > 2);
         print $@ if ($opts->{verbose} > 2);
@@ -402,12 +407,20 @@ sub check_table_status {
     my @dbs = $opts->{'database'} ? ($opts->{'database'}) : @{ $dbs };
     my %tables_status;
     eval {
+        local $SIG{ALRM} = sub { die 'TIMEOUT' };
+        alarm($OPTIONS{'timeout'});
+
         for my $db (@$dbs) {
             $tables_status{$db} = $dbh->selectall_hashref("SHOW TABLE STATUS FROM \`$db\`", 1);
         }
+        alarm(0);
     };
+    alarm(0);
+
     if ($@) {
-        print "UNKNOWN: Unable to get table status data\n";
+        print "UNKNOWN: Unable to get table status data";
+        print " in $OPTIONS{'timeout'} seconds" if ($@ eq "TIMEOUT");
+        print "\n";
         print "Errno: $dbh->{'mysql_errno'}\n" if ($opts->{'verbose'} > 1);
         print "Error: $dbh->{'mysql_error'}\n" if ($opts->{'verbose'} > 2);
         print $@ if ($opts->{verbose} > 2);
@@ -443,32 +456,37 @@ check_mysql_all - Nagios checks for 4.0+ versions of MySQL
 
 =head1 SYNOPSIS
 
- check_mysql_all <check_name> [options]
+ check_mysql_all -K <check_name> [options]
 
  Options:
-   --args|a     Optional arguments.  Comma-separated.  Check-specific.
-   --critical|c The level at which a critical alarm is raised.  Check-specific.
-   --database   The database to use
-   --help|h     Display this message and exit
-   --host|H     The target MySQL server host
-   --password|p The password of the MySQL user
-   --port       The port MySQL is listening on
-   --username|u The MySQL user used to connect
-   --verbose|v  Increase verbosity level
-   --version|V  Display version information and exit
-   --warning|w  The level at which a warning is raised.  Check-specific.
+   -a, --args=<key=value>    Optional arguments.
+   -K, --check=<check_name>  The check to run
+   -c, --critical=<limit>    The level at which a critical alarm is raised.
+   -d, --database=<dbname>   The database to use
+   -h, --help                Display this message and exit
+   -H, --host=<hostname>     The target MySQL server host
+   -p, --password=<password> The password of the MySQL user
+   --port=<portnum>          The port MySQL is listening on
+   -s, --socket=<sockfile>   Use the specified mysql unix socket to connect
+   -t, --timeout=<timeout>   Seconds before connection/query attempts timeout
+   -u, --username=<username> The MySQL user used to connect
+   -v, --verbose             Increase verbosity level
+   -V, --version             Display version information and exit
+   -w, --warning             The level at which a warning is raised.
 
  Defaults are:
 
  ATTRIBUTE                  VALUE
  -------------------------- ------------------
  args                       No default value
+ check                      No default value
  critical                   Check-specific
  database                   No default value
  help                       FALSE
  host                       localhost
  password                   No default value
  port                       3306
+ socket                     No default value
  timeout                    10 seconds
  username                   No default value
  verbose                    1 (out of 3)
@@ -478,6 +496,75 @@ check_mysql_all - Nagios checks for 4.0+ versions of MySQL
  The following checks are supported:
 
  connect repl_io repl_sql repl_sbm repl_all mysql_query connections table_status
+
+=head1 OPTIONS
+
+=over
+
+=item I<--args>|I<-a>
+
+Optional additional arguments for a particular check. Always takes the format 
+C<--args 'foo=bar'>. Check specific and can be repeated as often as necessary.
+
+=item I<--check>|I<-K>
+
+The check to run, see L<CHECKS> section for details. Only one check may be 
+specified at a time.
+
+=item I<--critical>|I<-c>
+
+The level at which a critical alarm is raised. Check-specific.
+
+=item I<--database>|I<-d>
+
+The database to use. No default value, will connect without a database if 
+not specified.
+
+=item I<--help>|I<-h>
+
+Display a short help message and exit.
+
+=item I<--host>|I<-H>
+
+The target MySQL server host.
+
+=item I<--password>|I<-p>
+
+The password of the MySQL user.
+
+=item I<--port>
+
+The port MySQL is listening on.
+
+=item I<--socket>|I<-s>
+
+Use the specified unix socket to connect with. Ignored if --host is specified 
+or is anything except 'localhost'.
+
+=item I<--timeout>|I<-t>
+
+Seconds before connection/query attempts timeout. Note that this does B<NOT>
+mean that the whole plugin will timeout in this interval, just the initial
+connection and each subsequent db query. The C<mysql_query> check has also has
+a separate timeout for the test query in case a different timeout is desired.
+
+=item I<--username>|I<-u>
+
+The MySQL user used to connect
+
+=item I<--verbose>|I<-v>
+
+Increase verbosity level. Can be used up to three times.
+
+=item I<--version>|I<-V>
+
+Display version information and exit.
+
+=item I<--warning>|I<-w>
+
+The level at which a warning is raised.  Check-specific.
+
+=back
 
 =head1 CHECKS
 
@@ -535,7 +622,9 @@ Run a given query, test if it executes properly.
 Returns CRITICAL if the query fails to execute for whatever reason, OK 
 otherwise.
     Permissions required: depends on the query
-    I<--args> => no default, specify query with C<query=...> and optionally query timeout with C<query_timeout=...>
+    I<--args> => no default:
+        C<query=...> => the query to run
+        C<query_timeout=...> => optional query timeout (default 30 seconds)
     I<--warning> => ignored
     I<--critical> => ignored
 
@@ -570,7 +659,7 @@ check_mysql_all requires the following Perl modules:
 =head1 BUGS
 
 Please report all bugs and feature requests to 
-http://code.google.com/p/check-mysql
+http://code.google.com/p/check-mysql-all
 
 =head1 LICENSE
 
