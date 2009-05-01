@@ -15,6 +15,7 @@ use Getopt::Long;
 use English qw(-no_match_vars);
 use DBI;
 use lib "/usr/local/nagios/libexec";
+use lib "/usr/lib/nagios/plugins";
 use lib "/usr/lib64/nagios/plugins";
 use utils qw(%ERRORS);
 
