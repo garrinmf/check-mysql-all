@@ -405,13 +405,13 @@ sub check_connections {
 sub check_table_status {
     my ($dbh, $opts, $args, $processlist, $variables, $status, $dbs) = @_;
 
-    my @dbs = $opts->{'database'} ? ($opts->{'database'}) : @{ $dbs };
+    my @check_dbs = $opts->{'database'} ? ($opts->{'database'}) : @{ $dbs };
     my %tables_status;
     eval {
         local $SIG{ALRM} = sub { die 'TIMEOUT' };
         alarm($OPTIONS{'timeout'});
 
-        for my $db (@$dbs) {
+        for my $db (@check_dbs) {
             $tables_status{$db} = $dbh->selectall_hashref("SHOW TABLE STATUS FROM \`$db\`", 1);
         }
         alarm(0);
@@ -441,11 +441,16 @@ sub check_table_status {
     }
 
     if (@errs) {
-        print 'CRITICAL: ', join(',', @errs), "\n";
+        print 'CRITICAL: ', scalar(@errs), ' table(s) with errors: ', join(',', @errs), "\n";
         exit $ERRORS{'CRITICAL'};
     }
 
-    print "OK: No errors found on any tables\n";
+    print 'OK: No errors found on any tables';
+    if ($opts->{'database'}) {
+        print " in db '$opts->{'database'}'\n";
+    } else {
+        print " in ", scalar(@check_dbs), " database(s)\n";
+    }
     exit $ERRORS{'OK'};
 }
  
