@@ -19,7 +19,7 @@ use lib "/usr/lib/nagios/plugins";
 use lib "/usr/lib64/nagios/plugins";
 use utils qw(%ERRORS);
 
-my $VERSION = '0.0.3';
+my $VERSION = '0.0.4';
 my @CHECKS = qw(connect repl_io repl_sql repl_sbm repl_all 
                 mysql_query connections table_status);
 my @REPL_CHECKS = qw(repl_io repl_sql repl_sbm repl_all);
@@ -703,7 +703,7 @@ Ryan Lowe (rlowe@pablowe.net)
 
 =head1 VERSION
 
-This manual page documents 0.0.3 of check_mysql_all
+This manual page documents 0.0.4 of check_mysql_all
 
 =cut
 
