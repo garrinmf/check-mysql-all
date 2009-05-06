@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/perl -T
 
 ################################################################################
 # check_mysql_all - Nagios Plug-In for typical MySQL checks. 4.0+
@@ -63,7 +63,10 @@ if ($OPTIONS{'version'}) {
 }
 
 # Verify valid check
-unless (grep {/^$OPTIONS{'check'}$/} @CHECKS) { 
+if (grep {/^$OPTIONS{'check'}$/} @CHECKS) {
+    $OPTIONS{'check'} =~ /^(.*)$/;
+    $OPTIONS{'check'} = $1;
+} else {
     print "UNKNOWN: Check $OPTIONS{'check'} is unrecognized\n";
     exit $ERRORS{'UNKNOWN'};
 }
@@ -156,7 +159,9 @@ sub validate_input {
     # Percents - positive integers 0-100 optionally ending in '%'
     if ($type eq 'percent') {
         $hash->{$key} =~ s/\%$//;
-        if ($hash->{$key} =~ /\D/) {
+        if ($hash->{$key} =~ /^(\d+)$/) {
+            $hash->{$key} = $1;
+        } else {
             print "UNKNOWN: '$key' should contain a positive integer (in percent)\n";
             exit $ERRORS{'UNKNOWN'};
         }
@@ -168,21 +173,27 @@ sub validate_input {
     # Seconds - positive intgers optionally ending in 's'
     } elsif ($type eq 'seconds') {
         $hash->{$key} =~ s/s$//;
-        if ($hash->{$key} =~ /\D/) {
+        if ($hash->{$key} =~ /(\d+)$/) {
+            $hash->{$key} = $1;
+        } else {
             print "UNKNOWN: '$key' should contain a positive integer (in seconds)\n";
             exit $ERRORS{'UNKNOWN'};
         }
 
     # Port - positive integers
     } elsif ($type eq 'port') {
-        if ($hash->{$key} =~ /\D/) {
+        if ($hash->{$key} =~ /^(\d+)$/) {
+            $hash->{$key} = $1;
+        } else {
             print "UNKNOWN: '$key' should contain a TCP port\n";
             exit $ERRORS{'UNKNOWN'};
         }
 
     # Host - any string only containing \w, '-', '.'
     } elsif ($type eq 'hostname') {
-        unless ($hash->{$key} =~ /^[\w\-\.]+$/) {
+        if ($hash->{$key} =~ /^([\w\-\.]+)$/) {
+            $hash->{$key} = $1;
+        } else {
             print "UNKNOWN: '$key' should contain a valid hostname\n";
             exit $ERRORS{'UNKNOWN'};
         }
