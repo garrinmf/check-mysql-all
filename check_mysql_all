@@ -322,15 +322,15 @@ sub check_repl_sbm {
         print "Last Error: $repl_status->{'Last_Error'}\n" if ($opts->{'verbose'} > 2);
         exit $ERRORS{'CRITICAL'};
     } elsif ($sbm >= $opts->{'critical'}) {
-        print "CRITICAL: Slave is $sbm seconds behind master\n";
+        print "CRITICAL: Slave is $sbm seconds behind master|'Seconds behind master'=${sbm}s;$opts->{'warning'};$opts->{'critical'}\n";
         exit $ERRORS{'CRITICAL'};
     } elsif ($sbm >= $opts->{'warning'}) {
-        print "WARNING: Slave is $sbm seconds behind master\n";
+        print "WARNING: Slave is $sbm seconds behind master|'Seconds behind master'=${sbm}s;$opts->{'warning'};$opts->{'critical'}\n";
         exit $ERRORS{'WARNING'};
     }
 
     unless ($opts->{'check'} eq 'repl_all') {
-        print "OK: Slave is $sbm seconds behind master\n";
+        print "OK: Slave is $sbm seconds behind master|'Seconds behind master'=${sbm}s;$opts->{'warning'};$opts->{'critical'}\n";
         exit $ERRORS{'OK'};
     }
 
@@ -347,7 +347,7 @@ sub check_repl_all {
     check_repl_sbm(@_);
 
     # Got this far, must be ok
-    print "OK: IO and SQL Threads are running, slave is $opts->{'sbm'} seconds behind master\n";
+    print "OK: IO and SQL Threads are running, slave is $opts->{'sbm'} seconds behind master|'Seconds behind master'=$opts->{'sbm'}s;$opts->{'warning'};$opts->{'critical'}\n";
     exit $ERRORS{'OK'};
 }
 
@@ -399,16 +399,18 @@ sub check_connections {
     my $processes = scalar keys %{$processlist};
     my $mc        = $variables->{'max_connections'}{'Value'};
     my $pcnt_used = int($processes*100/$mc + 0.5); # Round to nearest percent
+    my $num_warn  = int($mc * $opts->{'warning'}/100);
+    my $num_crit  = int($mc * $opts->{'critical'}/100);
 
     if ($pcnt_used >= $opts->{'critical'}) {
-        print "CRITICAL: $processes/$mc ($pcnt_used\%) connections are used\n";
+        print "CRITICAL: $processes/$mc ($pcnt_used\%) connections are used|connections=$processes;$num_warn;$num_crit;0;$mc\n";
         exit $ERRORS{'CRITICAL'};
     } elsif ($pcnt_used >= $opts->{'warning'}) {
-        print "WARNING: $processes/$mc ($pcnt_used\%) connections are used\n";
+        print "WARNING: $processes/$mc ($pcnt_used\%) connections are used|connections=$processes;$num_warn;$num_crit;0;$mc\n";
         exit $ERRORS{'WARNING'};
     }
 
-    print "OK: $processes/$mc ($pcnt_used\%) connections are used\n";
+    print "OK: $processes/$mc ($pcnt_used\%) connections are used|connections=$processes;$num_warn;$num_crit;0;$mc\n";
     exit $ERRORS{'OK'};
 }
 
