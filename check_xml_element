@@ -1,0 +1,181 @@
+#!/usr/bin/perl
+
+################################################################################
+# check_xml_element - Checks an XML file for the existence of an element
+# 
+# @author Ryan Lowe <ryan.a.lowe@percona.com>
+# @date   2009-05-17
+# @todo   Someday check for attributes
+################################################################################
+
+use strict;
+use warnings FATAL => 'all';
+use Pod::Usage;
+use XML::Simple;
+use LWP::Simple qw($ua get);
+use Time::HiRes qw(gettimeofday tv_interval);
+use Getopt::Long;
+use lib "/usr/local/nagios/libexec";
+use lib "/usr/lib/nagios/plugins";
+use lib "/usr/lib64/nagios/plugins";
+use utils qw(%ERRORS);
+
+my $VERSION = '0.0.1';
+my %OPTIONS;
+
+################################################################################
+# Get configuration information
+################################################################################
+
+# Parse command line opts
+my $gop=new Getopt::Long::Parser;
+$gop->configure('no_ignore_case','bundling');
+if (!$gop->getoptions(
+    'critical|c=s' => \$OPTIONS{'critical'},
+    'element|e=s'  => \$OPTIONS{'element' },
+    'help|h'       => \$OPTIONS{'help'    },
+    'hostname|H=s' => \$OPTIONS{'host'    },
+    'port|p=i'     => \$OPTIONS{'port'    },
+    'timeout|t=i'  => \$OPTIONS{'timeout' },
+    'uri=s'        => \$OPTIONS{'uri'     },
+    'verbose|v+'   => \$OPTIONS{'verbose' },
+    'version|V'    => \$OPTIONS{'version' },
+    'warning|w=s'  => \$OPTIONS{'warning' } ) ) {
+
+    pod2usage(2);
+}
+
+# Help if asked for or no check given
+pod2usage(2) if     ($OPTIONS{'help'});
+pod2usage(2) unless ($OPTIONS{'uri'});
+pod2usage(2) unless ($OPTIONS{'element'});
+
+# Yay for versions
+if ($OPTIONS{'version'}) {
+    print "$VERSION\n";
+    exit $ERRORS{'OK'};
+}
+
+$OPTIONS{'host'} = $OPTIONS{'host'} ? $OPTIONS{'host'} : 'localhost';
+$OPTIONS{'port'} = $OPTIONS{'port'} ? $OPTIONS{'port'} : 8161;
+$ua->timeout(($OPTIONS{'timeout'} ? $OPTIONS{'timeout'} : 1));
+$OPTIONS{'critical'} = $OPTIONS{'critical'} ? $OPTIONS{'critical'} : 200;
+$OPTIONS{'warning'} = $OPTIONS{'warning'} ? $OPTIONS{'warning'} : 150;
+
+my $start = ['gettimeofday'];
+my $content = get 'http://'.$OPTIONS{'host'}.':'.$OPTIONS{'port'}.$OPTIONS{'uri'};
+my $stop = ['gettimeofday'];
+
+if ((tv_interval($stop,$start)*100) gt $OPTIONS{'critical'}) {
+    print 'CRITICAL: get exceeded '.$OPTIONS{'critical'}.' milliseconds';
+    exit(2);
+} elsif ((tv_interval($stop,$start)*100) > $OPTIONS{'warning'}) {
+    print 'WARNING: get exceeded '.$OPTIONS{'warning'}.' milliseconds';
+    exit(1);
+}
+
+my $xml = new XML::Simple;
+my $data;
+
+eval {
+    $data = $xml->XMLin($content);
+};
+
+if ($@) {
+    print 'CRITICAL';
+    exit(2);
+}
+
+eval {
+    if ($data->{'queue'}->{$OPTIONS{'element'}} ne '') { 
+        print 'OK'; 
+        exit(0);
+    }
+};
+
+if ($@) {
+    print 'CRITICAL';
+    exit(2);
+}
+
+=pod
+
+=head1 NAME
+
+check_xml_element - A Nagios Check to fetch a remote XML file and check for 
+the existence of an element
+
+=head1 SYNOPSIS
+
+ check_xml_element [options] -H <hostname> --uri <URI> -e <element>
+
+ Options:
+   -c, --critical=<milliseconds> The fetch critical timeout
+   -e, --element=<element name>  The name of the element to look for
+   -h, --help                    Display this message and exit
+   -H, --host=<hostname>         The target host from which to fetch XML
+   -p, --port=<portnum>          The port on target host to use 
+   -t, --timeout=<timeout>       Seconds before connection attempts timeout
+   --uri=<uri>                   The URI on the host to XML
+   -v, --verbose                 Increase verbosity level
+   -V, --version                 Display version information and exit
+   -w, --warning=<milliseconds>  The fetch warning timeout
+
+ Defaults are:
+
+ ATTRIBUTE                  VALUE
+ -------------------------- ------------------
+ critical                   200
+ element                    (no default value)
+ help                       FALSE
+ host                       localhost
+ port                       8161 
+ timeout                    1 second
+ uri                        (no default value)
+ verbose                    1 (out of 3)
+ version                    FALSE
+ warning                    150
+
+=head1 SYSTEM REQUIREMENTS
+
+check_mysql_all requires the following Perl modules:
+
+  Pod::Usage
+  Getopt::Long
+  LWP::Simple
+  XML::Simple
+
+=head1 BUGS
+
+Please report all bugs and feature requests to
+http://code.google.com/p/check-mysql-all
+
+=head1 LICENSE
+
+This program is copyright (c) 2008 Ryan Lowe.
+Feedback and improvements are welcome (rlowe@pablowe.net).
+
+THIS PROGRAM IS PROVIDED "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED
+WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
+MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+
+This program is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 2; OR the Perl Artistic License.  On UNIX and similar
+systems, you can issue `man perlgpl' or `man perlartistic' to read these
+licenses.
+
+You should have received a copy of the GNU General Public License along with
+this program; if not, write to the Free Software Foundation, Inc., 59 Temple
+Place, Suite 330, Boston, MA  02111-1307 USA.
+
+=head1 AUTHOR
+
+Ryan Lowe (ryan.a.lowe@percona.com)
+
+=head1 VERSION
+
+This manual page documents 0.0.1 of check_xml_element
+
+=cut
+
