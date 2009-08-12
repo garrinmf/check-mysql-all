@@ -1,9 +1,9 @@
-#!/usr/bin/perl -T
+#!/usr/bin/perl 
 
 ################################################################################
 # check_maatkit - Nagios Plug-In for Maatkit checks. 
 #
-# @author  Ryan Lowe <ryan.a.lowe@percona.com
+# @author  Ryan Lowe <ryan.a.lowe@percona.com>
 # @date    2009-05-01
 # @license GPL v2
 ################################################################################
@@ -19,7 +19,7 @@ use lib "/usr/lib/nagios/plugins";
 use lib "/usr/lib64/nagios/plugins";
 use utils qw(%ERRORS);
 
-my $VERSION = '0.0.4';
+my $VERSION = '0.0.5';
 my @CHECKS = qw(mk-deadlock-logger);
 my %OPTIONS;
 my %ARGS;
@@ -128,9 +128,8 @@ if ( $@ ) {
 
 my $check = $OPTIONS{'check'};
 
-if ( $check eq 'mk-deadlock-logger' ) {
-    eval "$check(\$dbh, \\%OPTIONS, \\%ARGS);";
-}
+$check =~ s/-/_/g;
+eval "$check(\$dbh, \\%OPTIONS, \\%ARGS);";
 
 # Uh... shouldn't be here...
 print "UNKNOWN: Check '$check' failed to execute\n";
@@ -188,8 +187,8 @@ sub validate_input {
         }
 
     # Time - positive integers ending in [s|m|h|d|w]
-    } else if ($type eq 'time') {
-        if ($hash->{$key} m~ /s$/) {
+    } elsif ($type eq 'time') {
+        if ($hash->{$key} =~ /s$/) {
             $hash->{$key} =~ s/s$//;
             if ($hash->{$key} =~ /(\d+)$/) {
                 $hash->{$key} = $1;
@@ -197,7 +196,7 @@ sub validate_input {
                 print "UNKNOWN: '$key' should contain a positive integer, followed by [s|m|h|d|w]\n";
                 exit $ERRORS{'UNKNOWN'};
             }
-        } elsif ($hash->{$key} m~ /m$/) {
+        } elsif ($hash->{$key} =~ /m$/) {
             $hash->{$key} =~ s/m$//;
             if ($hash->{$key} =~ /(\d+)$/) {
                 $hash->{$key} = ($1 * 60);
@@ -205,7 +204,7 @@ sub validate_input {
                 print "UNKNOWN: '$key' should contain a positive integer, followed by [s|m|h|d|w]\n";
                 exit $ERRORS{'UNKNOWN'};
             } 
-        } elsif ($hash->{$key} m~ /h$/) {
+        } elsif ($hash->{$key} =~ /h$/) {
             $hash->{$key} =~ s/h$//;
             if ($hash->{$key} =~ /(\d+)$/) {
                 $hash->{$key} = ($1 * 3600);
@@ -213,7 +212,7 @@ sub validate_input {
                 print "UNKNOWN: '$key' should contain a positive integer, followed by [s|m|h|d|w]\n";
                 exit $ERRORS{'UNKNOWN'};
             }
-        } elsif ($hash->{$key} m~ /d$/) {
+        } elsif ($hash->{$key} =~ /d$/) {
             $hash->{$key} =~ s/d$//;
             if ($hash->{$key} =~ /(\d+)$/) {
                 $hash->{$key} = ($1 * 86400);
@@ -221,7 +220,7 @@ sub validate_input {
                 print "UNKNOWN: '$key' should contain a positive integer, followed by [s|m|h|d|w]\n";
                 exit $ERRORS{'UNKNOWN'};
             }
-        } elsif ($hash->{$key} m~ /w$/) {
+        } elsif ($hash->{$key} =~ /w$/) {
             $hash->{$key} =~ s/w$//;
             if ($hash->{$key} =~ /(\d+)$/) {
                 $hash->{$key} = ($1 * 604800);
@@ -246,26 +245,39 @@ sub validate_input {
 ################################################################################
 
 # Mysql query check
-sub mk-deadlock-logger {
+sub mk_deadlock_logger {
     my ($dbh, $opts, $args, $processlist, $variables, $status, $dbs) = @_;
 
     # Validate args
-    $args->{'timespan'} = $args->{'timespan'} ? $args->{'timespan'} : 3600;
+    $args->{'timespan'}      = $args->{'timespan'}      ? 
+        $args->{'timespan'}      : 3600;
+    $args->{'query_timeout'} = $args->{'query_timeout'} ?
+        $args->{'query_timeout'} : 5; 
     validate_input($args, 'timespan', 'time');
 
-    my $query = 'SELECT  
-    
+    my $query = "
+SELECT ROUND(COUNT(*)/2) AS deadlock_cnt 
+  FROM `$OPTIONS{'database'}`.`$OPTIONS{'table'}` 
+  WHERE ts >= DATE_SUB(NOW(), INTERVAL $args->{'timespan'} SECOND)
+";
+
+    my $res;
+    my $t;
+
     # Attempt query
     eval { 
         local $SIG{ALRM} = sub { die 'TIMEOUT' };
         alarm($args->{'query_timeout'});
 
-        my $r = $dbh->selectall_hashref($args->{'query'}, 1); 
+        $res = $dbh->selectall_hashref($query, 1); 
+
+        $t = (values(%{ $res }))[0];
         alarm(0);
     };
     alarm(0);
 
     if ($@) {
+        print $@;
         print 'CRITICAL: Query did not complete successfully';
         print " in $args->{'query_timeout'} seconds" if ($@ eq 'TIMEOUT');
         print "\n";
@@ -274,9 +286,27 @@ sub mk-deadlock-logger {
         print $@ if ($opts->{verbose} > 2);
         exit $ERRORS{'CRITICAL'};
     }
-    
-    print "OK: Query Executed Successfully\n";
+ 
+    if ($t->{'deadlock_cnt'} >= $opts->{'critical'}) {
+        print "CRITICAL: $t->{'deadlock_cnt'} deadlocks in the last $args->{'timespan'} seconds\n";
+        exit $ERRORS{'CRITICAL'};
+    } elsif ($t->{'deadlock_cnt'} >= $OPTIONS{'warning'}) {
+        print "WARNING: $t->{'deadlock_cnt'} deadlocks in the last $args->{'timespan'} seconds\n";
+        exit $ERRORS{'WARNING'};
+    } 
+
+    print "OK: $t->{'deadlock_cnt'} deadlocks in the last $args->{'timespan'} seconds\n";
     exit $ERRORS{'OK'};
+}
+
+sub mk_heartbeat {
+    my ($dbh, $opts, $args, $processlist, $variables, $status, $dbs) = @_;
+
+    my @records = `env mk-heartbeat --check -h $OPTIONS{'hostname'} -u $OPTIONS{'username'} -p $OPTIONS{'password'} -D $OPTIONS{'database'} -t $OPTIONS{'table'} --recurse $args->{'recurse'}`;
+
+    use Data::Dumper;
+    print Dumper(\@records);
+
 }
 
 =pod
@@ -409,7 +439,20 @@ Checks deadlocks over time.
         C<timespan=...> => optional timespan over which to check for deadlocks. default 1 hour
     I<--warning> => default 2 deadlocks over timespan
     I<--critical> => default 10 deadlocks over timespan
- 
+
+=item B<mk-heartbeat>
+
+Check replication heartbeat
+    Permissions required: PROCESS, SELECT, INSERT, UPDATE, DELETE on heartbeat table.
+    I<--args> => no default:
+        C<master=...> => the master against which to execute mk-heartbeat
+        C<user=...> => User to connect to the database
+        C<database=...> => Database with the heartbeat table
+        C<table=...> => Heartbeat Table
+        C<recurse=...> => Level of recurse. Defaults to 6
+    I<--warning> => default 30 seconds behind master
+    I<--critical> => default 300 seconds behind master
+
 =back
 
 =head1 SYSTEM REQUIREMENTS
@@ -429,7 +472,7 @@ http://code.google.com/p/check-mysql-all
 =head1 LICENSE
 
 This program is copyright (c) 2008 Ryan Lowe.
-Feedback and improvements are welcome (rlowe@pablowe.net).
+Feedback and improvements are welcome (ryan.a.lowe@percona.com).
 
 THIS PROGRAM IS PROVIDED "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED
 WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
@@ -447,11 +490,11 @@ Place, Suite 330, Boston, MA  02111-1307 USA.
 
 =head1 AUTHOR
 
-Ryan Lowe (rlowe@pablowe.net)
+Ryan Lowe (ryan.a.lowe@percona.com)
 
 =head1 VERSION
 
-This manual page documents 0.0.4 of check_maatkit
+This manual page documents 0.0.5 of check_maatkit
 
 =cut
 

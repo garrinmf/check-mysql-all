@@ -1,4 +1,4 @@
-#!/usr/bin/perl -T
+#!/usr/bin/perl 
 
 ################################################################################
 # check_mysql_all - Nagios Plug-In for typical MySQL checks. 4.0+
@@ -19,7 +19,7 @@ use lib "/usr/lib/nagios/plugins";
 use lib "/usr/lib64/nagios/plugins";
 use utils qw(%ERRORS);
 
-my $VERSION = '0.0.4';
+my $VERSION = '0.0.5';
 my @CHECKS = qw(connect repl_io repl_sql repl_sbm repl_all 
                 mysql_query connections table_status myisam_frag);
 my @REPL_CHECKS = qw(repl_io repl_sql repl_sbm repl_all);
@@ -827,7 +827,7 @@ Ryan Lowe (ryan.a.lowe@percona.com)
 
 =head1 VERSION
 
-This manual page documents 0.0.4 of check_mysql_all
+This manual page documents 0.0.5 of check_mysql_all
 
 =cut
 

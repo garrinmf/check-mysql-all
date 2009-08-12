@@ -20,7 +20,7 @@ use lib "/usr/lib/nagios/plugins";
 use lib "/usr/lib64/nagios/plugins";
 use utils qw(%ERRORS);
 
-my $VERSION = '0.0.1';
+my $VERSION = '0.0.5';
 my %OPTIONS;
 
 ################################################################################
@@ -153,7 +153,7 @@ http://code.google.com/p/check-mysql-all
 =head1 LICENSE
 
 This program is copyright (c) 2008 Ryan Lowe.
-Feedback and improvements are welcome (rlowe@pablowe.net).
+Feedback and improvements are welcome (ryan.a.lowe@percona.com).
 
 THIS PROGRAM IS PROVIDED "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED
 WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
@@ -175,7 +175,7 @@ Ryan Lowe (ryan.a.lowe@percona.com)
 
 =head1 VERSION
 
-This manual page documents 0.0.1 of check_xml_element
+This manual page documents 0.0.5 of check_xml_element
 
 =cut
 
