@@ -588,6 +588,7 @@ check_mysql_all - Nagios checks for 4.0+ versions of MySQL
  Options:
    -a, --args=<key=value>    Optional arguments.
    -K, --check=<check_name>  The check to run
+   --cnf=<config file>       Optional my.cnf to read username/pass/etc
    -c, --critical=<limit>    The level at which a critical alarm is raised.
    -d, --database=<dbname>   The database to use
    -h, --help                Display this message and exit
@@ -607,6 +608,7 @@ check_mysql_all - Nagios checks for 4.0+ versions of MySQL
  -------------------------- ------------------
  args                       No default value
  check                      No default value
+ cnf                        No default value
  critical                   Check-specific
  database                   No default value
  help                       FALSE
@@ -638,6 +640,10 @@ C<--args 'foo=bar'>. Check specific and can be repeated as often as necessary.
 
 The check to run, see L<CHECKS> section for details. Only one check may be 
 specified at a time.
+
+=item I<--cnf>
+
+An optional my.cnf to read for username/password.  Reads the [client] section
 
 =item I<--critical>|I<-c>
 
