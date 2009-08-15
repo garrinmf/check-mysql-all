@@ -1,0 +1,219 @@
+#!/usr/bin/perl 
+
+################################################################################
+# check_mmm - Nagios Plug-In for MMM checks.
+#
+# @author  Ryan Lowe <ryan.a.lowe@percona.com>
+# @date    2009-07-01
+# @license GPL v2
+#     
+################################################################################
+
+use strict;
+use warnings FATAL => 'all';
+use Pod::Usage;
+use Getopt::Long;
+use English qw(-no_match_vars);
+use lib "/usr/local/nagios/libexec";
+use lib "/usr/lib/nagios/plugins";
+use lib "/usr/lib64/nagios/plugins";
+use utils qw(%ERRORS);
+
+my $VERSION = '0.0.7';
+my %OPTIONS;
+my @STATES = qw(ADMIN_OFFLINE HARD_OFFLINE AWAITING_RECOVERY 
+                REPLICATION_FAIL REPLICATION_DELAY);
+
+################################################################################
+# Get configuration information
+################################################################################
+
+# Parse command line opts
+my $gop=new Getopt::Long::Parser;
+$gop->configure('no_ignore_case','bundling');
+if (!$gop->getoptions(
+    'cluster=s'    => \$OPTIONS{'cluster' },
+    'critical|c=s' => \$OPTIONS{'critical'},
+    'help|h'       => \$OPTIONS{'help'    },
+    'mmm-base=s'   => \$OPTIONS{'mmm-base'},
+    'verbose|v+'   => \$OPTIONS{'verbose' },
+    'version|V'    => \$OPTIONS{'version' },
+    'warning|w=s'  => \$OPTIONS{'warning' } ) ) {
+
+    pod2usage(2);
+}
+
+# Help if asked for or no check given
+pod2usage(2) if     ($OPTIONS{'help'});
+
+# Yay for versions
+if ($OPTIONS{'version'}) {
+    print "$VERSION\n";
+    exit $ERRORS{'OK'};
+}
+
+# Set global defaults/validate options
+$OPTIONS{'verbose'} = $OPTIONS{'verbose'} ? $OPTIONS{'verbose'} : 1;
+
+my @criticals = $OPTIONS{'critical'} ? 
+    split(',', $OPTIONS{'critical'}) : 
+        qw(HARD_OFFLINE REPLICATION_FAIL);
+
+foreach my $critic (@criticals) {
+    if (!grep {$critic eq $_} @STATES) {
+        print "UNKNOWN: State $critic\n";
+        exit $ERRORS{'UNKNOWN'};
+    }
+} 
+
+my @warnings = $OPTIONS{'warning'} ?
+    split(',', $OPTIONS{'warning'}) : 
+        qw(ADMIN_OFFLINE AWAITING_RECOVERY REPLICATION_DELAY);
+
+foreach my $warn (@warnings) {
+    if (!grep {$warn eq $_} @STATES) {
+        print "UNKNOWN: State $warn\n";
+        exit $ERRORS{'UNKNOWN'};
+    }
+}
+
+################################################################################
+# Begin the main program
+################################################################################
+
+chomp(my $mmm_control = $OPTIONS{'mmm-base'} ?
+    $OPTIONS{'mmm-base'}.'/sbin/mmm_control' : `which mmm_control 2>/dev/null`);
+$OPTIONS{'cluster'} = $OPTIONS{'cluster'} ? '@'.$OPTIONS{'cluster'} : '';
+my $mmm_cmd = $mmm_control.' '.$OPTIONS{'cluster'}.' show';
+
+# Verify executable was found
+if(! -x $mmm_control) {
+    print "CRITICAL: Cannot Find/Execute mmm_control\n";
+    exit $ERRORS{'CRITICAL'};
+}
+
+if ( $mmm_cmd ) {
+    chomp(my $mmm_output = `$mmm_cmd`);
+
+    # Check for CRITICALs
+    if ($mmm_output =~ /Error: Can't find monitoring system config/) {
+        print "CRITICAL: Can't find monitoring system config\n";
+        exit $ERRORS{'CRITICAL'};
+    } 
+
+    if ($mmm_output =~ /DAEMON IS NOT RUNNING/) {
+        print "CRITICAL: MMM Daemon is not running\n";
+        exit $ERRORS{'CRITICAL'};
+    }
+
+    foreach my $state (@criticals) {
+        if ($mmm_output =~ /$state/) {
+            # Which Host?
+            my @mmm_output = split(/\n/, $mmm_output);
+            foreach my $o (@mmm_output) {
+                if ($o =~ /$state/) {
+                    print "CRITICAL: $o\n";
+                    exit $ERRORS{'CRITICAL'};
+                }
+            }
+        }
+    }
+
+    # Check for WARNINGs
+    foreach my $state (@warnings) {
+        if ($mmm_output =~ /$state/) {
+            # Which Host?
+            my @mmm_output = split(/\n/, $mmm_output);
+            foreach my $o (@mmm_output) {
+                if ($o =~ /$state/) {
+                    print "WARNING: $o\n";
+                    exit $ERRORS{'WARNING'};
+                }
+            }
+        }
+    }
+
+    print "OK\n";
+ 
+} else {
+    print "CRITICAL: Cannot Find/Execute mmm_control\n";
+    exit $ERRORS{'CRITICAL'};
+}
+
+################################################################################
+# Documentation
+################################################################################
+
+=pod
+
+=head1 NAME
+
+check_mmm - Nagios checks for MMM
+
+=head1 SYNOPSIS
+
+ check_mmm [--cluster C#]
+
+ Options:
+   --cluster=<cluster_id>    The MMM Cluster to check
+   -c, --critical=<limit>    The level at which a critical alarm is raised.
+   -h, --help                Display this message and exit
+   --mmm-base=<base-dir>     Base directory where MMM is installed
+   -v, --verbose             Increase verbosity level
+   -V, --version             Display version information and exit
+   -w, --warning             The level at which a warning is raised.
+
+ Defaults are:
+
+ ATTRIBUTE                  VALUE
+ -------------------------- ------------------
+ cluster                    No default value
+ critical                   HARD_OFFLINE,REPLICATION_FAIL
+ help                       FALSE
+ mmm-base                   No default value
+ verbose                    1 (out of 3)
+ version                    FALSE
+ warning                    ADMIN_OFFLINE,AWAITING_RECOVERY,REPLICATION_DELAY
+
+=head1 SYSTEM REQUIREMENTS
+
+check_mmm requires the following Perl modules:
+
+  Pod::Usage
+  Getopt::Long
+  Nagios PlugIns util
+
+=head1 BUGS
+
+Please report all bugs and feature requests to 
+http://code.google.com/p/check-mysql-all
+
+=head1 LICENSE
+
+This program is copyright (c) 2009 Ryan Lowe
+Feedback and improvements are welcome (ryan.a.lowe@percona.com).
+
+THIS PROGRAM IS PROVIDED "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED
+WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
+MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+
+This program is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 2; OR the Perl Artistic License.  On UNIX and similar
+systems, you can issue `man perlgpl' or `man perlartistic' to read these
+licenses.
+
+You should have received a copy of the GNU General Public License along with
+this program; if not, write to the Free Software Foundation, Inc., 59 Temple
+Place, Suite 330, Boston, MA  02111-1307 USA.
+
+=head1 AUTHOR
+
+Ryan Lowe (ryan.a.lowe@percona.com)
+
+=head1 VERSION
+
+This manual page documents 0.0.7 of check_mmm
+
+=cut
+
