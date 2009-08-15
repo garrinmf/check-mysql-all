@@ -19,7 +19,7 @@ use lib "/usr/lib/nagios/plugins";
 use lib "/usr/lib64/nagios/plugins";
 use utils qw(%ERRORS);
 
-my $VERSION = '0.0.5';
+my $VERSION = '0.0.6';
 my @CHECKS = qw(connect repl_io repl_sql repl_sbm repl_all 
                 mysql_query connections table_status myisam_frag);
 my @REPL_CHECKS = qw(repl_io repl_sql repl_sbm repl_all);
@@ -36,6 +36,7 @@ $gop->configure('no_ignore_case','bundling');
 if (!$gop->getoptions(
     'args|a=s%'    => \%ARGS,
     'check|K=s'    => \$OPTIONS{'check'   },
+    'cnf=s'        => \$OPTIONS{'cnf'     },
     'critical|c=s' => \$OPTIONS{'critical'},
     'database|d=s' => \$OPTIONS{'database'},
     'help|h'       => \$OPTIONS{'help'    },
@@ -92,6 +93,8 @@ validate_input(\%OPTIONS, 'port', 'port');
 
 # Attempt db connection
 my $connection_string  = 'DBI:mysql:';
+$connection_string    .= "mysql_read_default_file=$OPTIONS{'cnf'};" if $OPTIONS{'cnf'};
+$connection_string    .= "mysql_read_default_group=client;" if $OPTIONS{'cnf'};
 $connection_string    .= "host=$OPTIONS{'host'};";
 $connection_string    .= "database=$OPTIONS{'database'};"
     if $OPTIONS{'database'};
@@ -827,7 +830,7 @@ Ryan Lowe (ryan.a.lowe@percona.com)
 
 =head1 VERSION
 
-This manual page documents 0.0.5 of check_mysql_all
+This manual page documents 0.0.6 of check_mysql_all
 
 =cut
 
