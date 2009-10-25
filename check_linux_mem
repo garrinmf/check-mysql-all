@@ -44,8 +44,8 @@ if ($opts{'version'}) {
 }
  
 $opts{verbose}  = $opts{verbose}  ? $opts{verbose}  : 1;
-$opts{warning}  = $opts{warning}  ? $opts{warning}  : 90;
-$opts{critical} = $opts{critical} ? $opts{critical} : 95;
+$opts{warning}  = $opts{warning}  ? $opts{warning}  : 95;
+$opts{critical} = $opts{critical} ? $opts{critical} : 99;
  
 ################################################################################
 # Begin the main program
@@ -83,6 +83,15 @@ check_linux_mem - Linux memory usage checks using the proc filesystem
    --help|?     Display this message and exit
    --version|V  Display version information and exit
    --warning|w  The percent usage at which a warning is raised.
+
+ Defaults Are:
+
+ ATTRIBUTE                  VALUE
+ -------------------------- ------------------
+ critical                   99%
+ help                       FALSE
+ version                    FALSE
+ warning                    95%
  
 =head1 SYSTEM REQUIREMENTS
  
