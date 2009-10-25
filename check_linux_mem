@@ -1,0 +1,126 @@
+#!/usr/bin/perl
+ 
+################################################################################
+# check_linux_mem - Nagios Plug-In for checking memory (using /proc/meminfo)
+#
+# @author  Ryan Lowe <ryan.a.lowe@percona.com>
+# @date    2009-03-11
+# @license GPL v2
+################################################################################
+ 
+use strict;
+use warnings FATAL => 'all';
+use Pod::Usage;
+use Getopt::Long qw(:config no_ignore_case bundling);
+use English qw(-no_match_vars);
+use lib "/usr/local/nagios/libexec";
+use lib "/usr/lib64/nagios/plugins";
+use utils qw(%ERRORS);
+ 
+my $VERSION = '0.0.2';
+ 
+################################################################################
+# Get configuration information
+################################################################################
+ 
+my %opts;
+my $gop=new Getopt::Long::Parser;
+ 
+if (!$gop->getoptions(
+    'critical|c=s' => \$opts { 'critical' },
+    'help|h'       => \$opts { 'help'     },
+    'verbose|v+'   => \$opts { 'verbose'  },
+    'version|V'    => \$opts { 'version'  },
+    'warning|w=s'  => \$opts { 'warning'  } ) ) {
+ 
+    pod2usage(2);
+}
+ 
+pod2usage(2) if ($opts{'help'});
+ 
+if ($opts{'version'}) {
+    print "$VERSION\n";
+    exit $ERRORS{'OK'};
+}
+ 
+$opts{verbose}  = $opts{verbose}  ? $opts{verbose}  : 1;
+$opts{warning}  = $opts{warning}  ? $opts{warning}  : 90;
+$opts{critical} = $opts{critical} ? $opts{critical} : 95;
+ 
+################################################################################
+# Begin the main program
+################################################################################
+ 
+my $total_memory = `/bin/cat /proc/meminfo |/bin/grep -i MemTotal | /bin/awk {'print \$2'}`;
+my $free_memory  = `/bin/cat /proc/meminfo |/bin/grep -i MemFree  | /bin/awk {'print \$2'}`;
+chomp($total_memory);
+chomp($free_memory);
+my $pct_used     = int(100 - ((($free_memory / $total_memory) * 100) - 0.5));
+ 
+if ($pct_used >= $opts{critical}) {
+    print "CRITICAL: $pct_used% memory used\n";
+    exit $ERRORS{'CRITICAL'};
+} elsif ($pct_used >= $opts{warning}) {
+    print "WARNING: $pct_used% memory used\n";
+    exit $ERRORS{'WARNING'};
+} else {
+    print "OK: $pct_used% memory used\n";
+    exit $ERRORS{'OK'};
+}
+ 
+=pod
+ 
+=head1 NAME
+ 
+check_linux_mem - Linux memory usage checks using the proc filesystem
+ 
+=head1 SYNOPSIS
+ 
+ check_linux_mem -w warning -c critical
+ 
+ Options:
+   --critical|c The percent usage at which a critical alarm is raised.
+   --help|?     Display this message and exit
+   --version|V  Display version information and exit
+   --warning|w  The percent usage at which a warning is raised.
+ 
+=head1 SYSTEM REQUIREMENTS
+ 
+check_linux_mem requires the following Perl modules:
+ 
+  Pod::Usage
+  Getopt::Long
+ 
+=head1 BUGS
+ 
+Please report all bugs and feature requests to
+http://code.google.com/p/check-mysql-all/
+ 
+=head1 LICENSE
+ 
+This program is copyright (c) 2008 Ryan Lowe.
+Feedback and improvements are welcome (ryan.a.lowe@percona.com).
+ 
+THIS PROGRAM IS PROVIDED "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED
+WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
+MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+ 
+This program is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 2; OR the Perl Artistic License.  On UNIX and similar
+systems, you can issue `man perlgpl' or `man perlartistic' to read these
+licenses.
+ 
+You should have received a copy of the GNU General Public License along with
+this program; if not, write to the Free Software Foundation, Inc., 59 Temple
+Place, Suite 330, Boston, MA  02111-1307 USA.
+ 
+=head1 AUTHOR
+ 
+Ryan Lowe (ryan.a.lowe@percona.com)
+ 
+=head1 VERSION
+ 
+This manual page documents 0.0.2 of check_linux_mem
+ 
+=cut
