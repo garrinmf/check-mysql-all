@@ -19,7 +19,7 @@ use lib "/usr/lib/nagios/plugins";
 use lib "/usr/lib64/nagios/plugins";
 use utils qw(%ERRORS);
 
-my $VERSION = '0.0.5';
+my $VERSION = '0.0.8';
 my @CHECKS = qw(mk-deadlock-logger);
 my %OPTIONS;
 my %ARGS;
@@ -494,7 +494,7 @@ Ryan Lowe (ryan.a.lowe@percona.com)
 
 =head1 VERSION
 
-This manual page documents 0.0.5 of check_maatkit
+This manual page documents 0.0.8 of check_maatkit
 
 =cut
 

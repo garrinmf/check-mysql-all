@@ -19,7 +19,7 @@ use lib "/usr/lib/nagios/plugins";
 use lib "/usr/lib64/nagios/plugins";
 use utils qw(%ERRORS);
 
-my $VERSION = '0.0.7';
+my $VERSION = '0.0.8';
 my %OPTIONS;
 my @STATES = qw(ADMIN_OFFLINE HARD_OFFLINE AWAITING_RECOVERY 
                 REPLICATION_FAIL REPLICATION_DELAY);
@@ -213,7 +213,7 @@ Ryan Lowe (ryan.a.lowe@percona.com)
 
 =head1 VERSION
 
-This manual page documents 0.0.7 of check_mmm
+This manual page documents 0.0.8 of check_mmm
 
 =cut
 

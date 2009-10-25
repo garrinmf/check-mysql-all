@@ -17,7 +17,7 @@ use lib "/usr/local/nagios/libexec";
 use lib "/usr/lib64/nagios/plugins";
 use utils qw(%ERRORS);
  
-my $VERSION = '0.0.2';
+my $VERSION = '0.0.8';
  
 ################################################################################
 # Get configuration information
@@ -121,6 +121,6 @@ Ryan Lowe (ryan.a.lowe@percona.com)
  
 =head1 VERSION
  
-This manual page documents 0.0.2 of check_linux_mem
+This manual page documents 0.0.8 of check_linux_mem
  
 =cut
