@@ -4,7 +4,8 @@
 # check_mmm - Nagios Plug-In for MMM checks.
 #
 # @author  Ryan Lowe <ryan.a.lowe@percona.com>
-# @date    2009-07-01
+# 		   Istvan Podor <istvan.podor@percona.com>
+# @date    2009-11-25
 # @license GPL v2
 #     
 ################################################################################
@@ -13,16 +14,52 @@ use strict;
 use warnings FATAL => 'all';
 use Pod::Usage;
 use Getopt::Long;
+use Sys::Hostname;
 use English qw(-no_match_vars);
 use lib "/usr/local/nagios/libexec";
 use lib "/usr/lib/nagios/plugins";
 use lib "/usr/lib64/nagios/plugins";
 use utils qw(%ERRORS);
 
-my $VERSION = '0.0.8';
+my $VERSION = '0.0.9';
 my %OPTIONS;
 my @STATES = qw(ADMIN_OFFLINE HARD_OFFLINE AWAITING_RECOVERY 
                 REPLICATION_FAIL REPLICATION_DELAY);
+
+################################################################################
+# Define some requirement for nsca
+################################################################################
+
+my $report_host;
+my $NSCA  		= "no";
+my $nsca_conf 	= '';
+
+# this function report error on the old way or report to nsca
+sub report_error {
+	my ($message, $error_code) = @_;
+	if ( $NSCA ne "yes") {
+		print $message."\n";
+	} else {
+		report_nsca($message, $error_code);
+	}
+exit $error_code;
+}
+
+# this function report to nsca
+sub report_nsca {
+	my ($message, $error_code) = @_;
+	chomp(my $send_nsca = `which send_nsca`);
+	if (! -x $send_nsca ) {
+		print "Can't find send_nsca executeable\n";
+		exit 1;
+	}
+	my $nsca_msg = $report_host."\tcheck_mmm\t".$error_code."\t".$message."\n";
+	if ($OPTIONS{'nsca-conf'}) {
+		$nsca_conf = "-c $OPTIONS{'nsca-conf'}";
+	}
+	`echo -e '$nsca_msg' | send_nsca -H $OPTIONS{'nsca-host'} $nsca_conf`;
+}
+
 
 ################################################################################
 # Get configuration information
@@ -32,16 +69,20 @@ my @STATES = qw(ADMIN_OFFLINE HARD_OFFLINE AWAITING_RECOVERY
 my $gop=new Getopt::Long::Parser;
 $gop->configure('no_ignore_case','bundling');
 if (!$gop->getoptions(
-    'cluster=s'    => \$OPTIONS{'cluster' },
-    'critical|c=s' => \$OPTIONS{'critical'},
-    'help|h'       => \$OPTIONS{'help'    },
-    'mmm-base=s'   => \$OPTIONS{'mmm-base'},
-    'verbose|v+'   => \$OPTIONS{'verbose' },
-    'version|V'    => \$OPTIONS{'version' },
-    'warning|w=s'  => \$OPTIONS{'warning' } ) ) {
-
-    pod2usage(2);
-}
+    'cluster=s'    => \$OPTIONS{'cluster'  },
+    'critical|c=s' => \$OPTIONS{'critical' },
+    'help|h'       => \$OPTIONS{'help'     },
+    'mmm-base=s'   => \$OPTIONS{'mmm-base' },
+    'verbose|v+'   => \$OPTIONS{'verbose'  },
+    'version|V'    => \$OPTIONS{'version'  },
+    'warning|w=s'  => \$OPTIONS{'warning'  },
+ 	'nsca-host=s'  => \$OPTIONS{'nsca-host'},
+	'nsca-this=s'  => \$OPTIONS{'nsca-this'},
+	'nsca-conf=s'  => \$OPTIONS{'nsca-conf'}
+					) 
+	)	{
+    		pod2usage(2);
+		}
 
 # Help if asked for or no check given
 pod2usage(2) if     ($OPTIONS{'help'});
@@ -49,11 +90,23 @@ pod2usage(2) if     ($OPTIONS{'help'});
 # Yay for versions
 if ($OPTIONS{'version'}) {
     print "$VERSION\n";
-    exit $ERRORS{'OK'};
+	exit $ERRORS{'OK'};
 }
 
 # Set global defaults/validate options
 $OPTIONS{'verbose'} = $OPTIONS{'verbose'} ? $OPTIONS{'verbose'} : 1;
+
+#check for nsca options
+if ($OPTIONS{'nsca-host'}) {
+	# this means we run with nsca host to report
+	$NSCA = 'yes';
+	if (!$OPTIONS{'nsca-this'}) {
+		chomp($report_host = `hostname -s`);
+	} else {
+		$report_host = $OPTIONS{'nsca-this'};
+	}
+	
+}
 
 my @criticals = $OPTIONS{'critical'} ? 
     split(',', $OPTIONS{'critical'}) : 
@@ -76,6 +129,7 @@ foreach my $warn (@warnings) {
         exit $ERRORS{'UNKNOWN'};
     }
 }
+
 
 ################################################################################
 # Begin the main program
@@ -102,8 +156,13 @@ if ( $mmm_cmd ) {
     } 
 
     if ($mmm_output =~ /DAEMON IS NOT RUNNING/) {
-        print "CRITICAL: MMM Daemon is not running\n";
-        exit $ERRORS{'CRITICAL'};
+        my $msg = "CRITICAL: MMM Daemon is not running";
+        report_error($msg, $ERRORS{'CRITICAL'});
+    }
+	#mmm2 extend
+    if ($mmm_output =~ m/passive/i) {
+        my $msg = "CRITICAL: MMM Daemon is in passive mode";
+        report_error($msg, $ERRORS{'WARNING'});
     }
 
     foreach my $state (@criticals) {
@@ -112,8 +171,8 @@ if ( $mmm_cmd ) {
             my @mmm_output = split(/\n/, $mmm_output);
             foreach my $o (@mmm_output) {
                 if ($o =~ /$state/) {
-                    print "CRITICAL: $o\n";
-                    exit $ERRORS{'CRITICAL'};
+                    my $msg = "CRITICAL: $o";
+                    report_error($msg, $ERRORS{'CRITICAL'});
                 }
             }
         }
@@ -126,8 +185,8 @@ if ( $mmm_cmd ) {
             my @mmm_output = split(/\n/, $mmm_output);
             foreach my $o (@mmm_output) {
                 if ($o =~ /$state/) {
-                    print "WARNING: $o\n";
-                    exit $ERRORS{'WARNING'};
+                    my $msg = "WARNING: $o";
+                    report_error($msg, $ERRORS{'WARNING'});
                 }
             }
         }
@@ -136,8 +195,8 @@ if ( $mmm_cmd ) {
     print "OK\n";
  
 } else {
-    print "CRITICAL: Cannot Find/Execute mmm_control\n";
-    exit $ERRORS{'CRITICAL'};
+	my $msg = "CRITICAL: Cannot Find/Execute mmm_control";
+    report_error($msg, $ERRORS{'CRITICAL'});
 }
 
 ################################################################################
@@ -155,13 +214,16 @@ check_mmm - Nagios checks for MMM
  check_mmm [--cluster C#]
 
  Options:
-   --cluster=<cluster_id>    The MMM Cluster to check
-   -c, --critical=<limit>    The level at which a critical alarm is raised.
-   -h, --help                Display this message and exit
-   --mmm-base=<base-dir>     Base directory where MMM is installed
-   -v, --verbose             Increase verbosity level
-   -V, --version             Display version information and exit
-   -w, --warning             The level at which a warning is raised.
+   --cluster=<cluster_id>    	The MMM Cluster to check
+   -c, --critical=<limit>    	The level at which a critical alarm is raised.
+   -h, --help                	Display this message and exit
+   --mmm-base=<base-dir>     	Base directory where MMM is installed
+   -v, --verbose             	Increase verbosity level
+   -V, --version             	Display version information and exit
+   -w, --warning             	The level at which a warning is raised.
+   --nsca-host=<remote host>	Address of the remote nsca host
+   --nsca-this=<hostname>		Hostname to report for nagios
+   --nsca-conf=<path-to-conf>	Path to nsca config file
 
  Defaults are:
 
@@ -174,6 +236,9 @@ check_mmm - Nagios checks for MMM
  verbose                    1 (out of 3)
  version                    FALSE
  warning                    ADMIN_OFFLINE,AWAITING_RECOVERY,REPLICATION_DELAY
+ nsca-host					FALSE
+ nsca-this					Default is the local hostname
+ nsca-conf					No default value
 
 =head1 SYSTEM REQUIREMENTS
 
@@ -181,7 +246,9 @@ check_mmm requires the following Perl modules:
 
   Pod::Usage
   Getopt::Long
+  Sys::Hostname
   Nagios PlugIns util
+  Proper NSCA configuration
 
 =head1 BUGS
 
@@ -209,11 +276,12 @@ Place, Suite 330, Boston, MA  02111-1307 USA.
 
 =head1 AUTHOR
 
-Ryan Lowe (ryan.a.lowe@percona.com)
+Ryan Lowe (ryan.a.lowe@percona.com) -- main source
+Istvan Podor (istvan.podor@percona.com) -- nsca extension
 
 =head1 VERSION
 
-This manual page documents 0.0.8 of check_mmm
+This manual page documents 0.0.9 of check_mmm
 
 =cut
 
