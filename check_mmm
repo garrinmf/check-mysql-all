@@ -7,7 +7,7 @@
 # check_mmm - Nagios Plug-In for MMM checks.
 #
 # @author  Ryan Lowe <ryan.a.lowe@percona.com>
-# 		   Istvan Podor <istvan.podor@percona.com>
+#          Istvan Podor <istvan.podor@percona.com>
 # @date    2009-11-25
 # @license GPL v2
 #     
@@ -50,17 +50,20 @@ exit $error_code;
 
 # this function report to nsca
 sub report_nsca {
-	my ($message, $error_code) = @_;
-	chomp(my $send_nsca = `which send_nsca`);
-	if (! -x $send_nsca ) {
-		print "Can't find send_nsca executeable\n";
-		exit 1;
-	}
-	my $nsca_msg = $report_host."\tcheck_mmm\t".$error_code."\t".$message."\n";
-	if ($OPTIONS{'nsca-conf'}) {
-		$nsca_conf = "-c $OPTIONS{'nsca-conf'}";
-	}
-	`echo -e '$nsca_msg' | send_nsca -H $OPTIONS{'nsca-host'} $nsca_conf`;
+    my ($message, $error_code) = @_;
+    chomp(my $send_nsca = `which send_nsca`);
+    if (! -x $send_nsca ) {
+        print "Can't find send_nsca executeable\n";
+        exit 1;
+    }
+
+    my $nsca_msg = $report_host."\tcheck_mmm\t".$error_code."\t".$message."\n";
+
+    if ($OPTIONS{'nsca-conf'}) {
+        $nsca_conf = "-c $OPTIONS{'nsca-conf'}";
+    }
+
+    `echo -e '$nsca_msg' | send_nsca -H $OPTIONS{'nsca-host'} $nsca_conf`;
 }
 
 
@@ -79,13 +82,11 @@ if (!$gop->getoptions(
     'verbose|v+'   => \$OPTIONS{'verbose'  },
     'version|V'    => \$OPTIONS{'version'  },
     'warning|w=s'  => \$OPTIONS{'warning'  },
- 	'nsca-host=s'  => \$OPTIONS{'nsca-host'},
-	'nsca-this=s'  => \$OPTIONS{'nsca-this'},
-	'nsca-conf=s'  => \$OPTIONS{'nsca-conf'}
-					) 
-	)	{
-    		pod2usage(2);
-		}
+    'nsca-host=s'  => \$OPTIONS{'nsca-host'},
+    'nsca-this=s'  => \$OPTIONS{'nsca-this'},
+    'nsca-conf=s'  => \$OPTIONS{'nsca-conf'})) {
+    pod2usage(2);
+}
 
 # Help if asked for or no check given
 pod2usage(2) if     ($OPTIONS{'help'});
@@ -101,14 +102,13 @@ $OPTIONS{'verbose'} = $OPTIONS{'verbose'} ? $OPTIONS{'verbose'} : 1;
 
 #check for nsca options
 if ($OPTIONS{'nsca-host'}) {
-	# this means we run with nsca host to report
-	$NSCA = 'yes';
-	if (!$OPTIONS{'nsca-this'}) {
-		chomp($report_host = `hostname -s`);
-	} else {
-		$report_host = $OPTIONS{'nsca-this'};
-	}
-	
+    # this means we run with nsca host to report
+    $NSCA = 'yes';
+    if (!$OPTIONS{'nsca-this'}) {
+        chomp($report_host = `hostname -s`);
+    } else {
+        $report_host = $OPTIONS{'nsca-this'};
+    }
 }
 
 my @criticals = $OPTIONS{'critical'} ? 
@@ -239,9 +239,9 @@ check_mmm - Nagios checks for MMM
  verbose                    1 (out of 3)
  version                    FALSE
  warning                    ADMIN_OFFLINE,AWAITING_RECOVERY,REPLICATION_DELAY
- nsca-host					FALSE
- nsca-this					Default is the local hostname
- nsca-conf					No default value
+ nsca-host                  FALSE
+ nsca-this                  Default is the local hostname
+ nsca-conf                  No default value
 
 =head1 SYSTEM REQUIREMENTS
 
