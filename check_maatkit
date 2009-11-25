@@ -1,5 +1,8 @@
 #!/usr/bin/perl 
 
+# DO NOT USE EMBEDDED PERL
+# nagios: -epn
+
 ################################################################################
 # check_maatkit - Nagios Plug-In for Maatkit checks. 
 #

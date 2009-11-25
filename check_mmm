@@ -1,5 +1,8 @@
 #!/usr/bin/perl 
 
+# DO NOT USE EMBEDDED PERL
+# nagios: -epn
+
 ################################################################################
 # check_mmm - Nagios Plug-In for MMM checks.
 #

@@ -1,5 +1,8 @@
 #!/usr/bin/perl 
 
+# DO NOT USE EMBEDDED PERL
+# nagios: -epn
+
 ################################################################################
 # check_mysql_all - Nagios Plug-In for typical MySQL checks. 4.0+
 #

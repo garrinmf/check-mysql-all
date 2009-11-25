@@ -1,4 +1,7 @@
 #!/usr/bin/perl
+
+# DO NOT USE EMBEDDED PERL
+# nagios: -epn
  
 ################################################################################
 # check_linux_mem - Nagios Plug-In for checking memory (using /proc/meminfo)

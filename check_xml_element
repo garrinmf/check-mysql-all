@@ -1,5 +1,8 @@
 #!/usr/bin/perl
 
+# DO NOT USE EMBEDDED PERL
+# nagios: -epn
+
 ################################################################################
 # check_xml_element - Checks an XML file for the existence of an element
 # 
