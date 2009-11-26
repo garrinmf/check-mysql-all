@@ -22,7 +22,7 @@ use lib "/usr/lib/nagios/plugins";
 use lib "/usr/lib64/nagios/plugins";
 use utils qw(%ERRORS);
 
-my $VERSION = '0.0.8';
+my $VERSION = '0.0.9';
 my @CHECKS = qw(mk-deadlock-logger);
 my %OPTIONS;
 my %ARGS;

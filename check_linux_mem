@@ -20,7 +20,7 @@ use lib "/usr/local/nagios/libexec";
 use lib "/usr/lib64/nagios/plugins";
 use utils qw(%ERRORS);
  
-my $VERSION = '0.0.8';
+my $VERSION = '0.0.9';
  
 ################################################################################
 # Get configuration information
