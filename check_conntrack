@@ -1,0 +1,60 @@
+#!/bin/sh
+
+################################################################################
+# check_conntrack - Check connections established.
+# 
+# @author Ryan Lowe <ryan.a.lowe@percona.com>
+# @date   2009-12-03
+# 
+# Adapted From: http://exchange.nagios.org/directory/Plugins/Uncategorized/Software/check_conntrack-2Esh/details
+################################################################################
+
+set -u
+set -e
+
+if [ $# != 2 ]; then
+    echo "Usage: check_conntrack <warn percent> <crit percent>"
+    echo "Example: check_conntrack 75 90"
+    exit -1
+fi
+
+if [ $1 -ge $2 ]; then
+    echo "The WARNING level must be <= the CRITICAL level"
+    exit -1
+fi
+
+# Different /proc implementations ... 
+COUNT_FILE=`/usr/bin/find /proc/sys -name *conntrack_count | /usr/bin/head -n 1`
+MAX_FILE=`/usr/bin/find /proc/sys -name *conntrack_max | /usr/bin/head -n 1`
+
+if [ -z $MAX_FILE ] || [ -z $COUNT_FILE ]; then
+    echo "ERROR - Cannot find conntrack files in /proc/net/"
+    exit -1
+fi
+
+# Calculate our values
+COUNT=`/bin/cat $COUNT_FILE | /usr/bin/head -n 1`
+MAX=`/bin/cat $MAX_FILE | /usr/bin/head -n 1 `
+WARN=`/usr/bin/expr $MAX \* $1 \/ 100`
+CRIT=`/usr/bin/expr $MAX \* $2 \/ 100`
+PCT=`/bin/echo "scale=3;($COUNT/$MAX)*100" | /usr/bin/bc`
+
+# Evaluate the results
+if [ `/usr/bin/expr $COUNT \< $WARN` == `/usr/bin/expr $COUNT \> 0` ]; then
+    echo "OK - $COUNT |con=$COUNT ($PCT%)"
+    exit 0
+fi
+
+if [ `/usr/bin/expr $COUNT \< $CRIT` == `/usr/bin/expr $COUNT \> $WARN` ]; then
+    echo "WARNING - $COUNT |con=$COUNT ($PCT%)"
+    exit 1
+fi
+
+if [ `/usr/bin/expr $COUNT \> $CRIT` ]; then
+    echo "CRITICAL - $COUNT |con=$COUNT ($PCT%)"
+    exit 2
+fi
+
+echo "UNKNOWN"
+exit -1
+
