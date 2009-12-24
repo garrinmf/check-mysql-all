@@ -1,0 +1,599 @@
+#!/usr/bin/perl 
+
+# DO NOT USE EMBEDDED PERL
+# nagios: -epn
+
+################################################################################
+# check_redis - Nagios Plug-In for typical Redis checks.
+#
+# @author  Ryan Lowe <ryan.a.lowe@percona.com>
+# @date    2009-12-23
+# @license GPL v2
+#
+# @todo Time::Hires???
+################################################################################
+
+use strict;
+use warnings FATAL => 'all';
+use Pod::Usage;
+use Getopt::Long;
+use English qw(-no_match_vars);
+use Redis;
+use Time::HiRes qw(gettimeofday tv_interval ualarm);
+use lib "/usr/local/nagios/libexec";
+use lib "/usr/lib/nagios/plugins";
+use lib "/usr/lib64/nagios/plugins";
+use utils qw(%ERRORS);
+
+my $VERSION = '0.0.1';
+                
+################################################################################
+# Command Types
+################################################################################
+
+my @STRING_COMMANDS = qw(set setnx get mget incr decr exists del type);
+
+my @KEYSPACE_COMMANDS = qw(keys randomkey rename dbsize);
+
+my @LIST_COMMANDS = qw(rpush lpush llen lrange ltrim 
+                       lindex lset lrem lpop rpop);
+
+my @SET_COMMANDS = qw(sadd srem scard sismember sinter sinterstore);
+
+my @DATABASE_COMMANDS = qw(select move flushdb flushall);
+
+my @SORT_COMMANDS = qw(sort);
+
+my @PERSISTENCE_COMMANDS = qw(save bgsave lastsave shutdown);
+
+my @CONTROL_COMMANDS = qw(info);
+
+my @COMMANDS = qw(info save bgsave lastsave shutdown sort select move flushdb
+                  flushall sadd srem scard sismember sinter sinterstore
+                  rpush lpush llen lrange ltrim lindex lset lrem lpop rpop
+                  keys randomkey rename dbsize set setnx get mget incr decr
+                  exists del type connect);
+
+################################################################################
+# Get configuration information
+################################################################################
+
+my %OPTIONS;
+my %ARGS;
+
+# Parse command line opts
+my $gop=new Getopt::Long::Parser;
+$gop->configure('no_ignore_case','bundling');
+if (!$gop->getoptions(
+    'check|K=s'    => \$OPTIONS{'check'   },
+    'cnf=s'        => \$OPTIONS{'cnf'     },
+    'critical|c=s' => \$OPTIONS{'critical'},
+    'database|d=s' => \$OPTIONS{'database'},
+    'help|h'       => \$OPTIONS{'help'    },
+    'hostname|H=s' => \$OPTIONS{'host'    },
+    'key=s'        => \$OPTIONS{'key'     },
+    'password|p=s' => \$OPTIONS{'password'},
+    'port=i'       => \$OPTIONS{'port'    },
+    'socket|s=s'   => \$OPTIONS{'socket'  },
+    'timeout|t=i'  => \$OPTIONS{'timeout' },
+    'username|u=s' => \$OPTIONS{'user'    },
+    'value=s'      => \$OPTIONS{'value'   },
+    'verbose|v+'   => \$OPTIONS{'verbose' },
+    'version|V'    => \$OPTIONS{'version' },
+    'warning|w=s'  => \$OPTIONS{'warning' } ) ) {
+
+    pod2usage(2);
+}
+
+# Help if asked for or no check given
+pod2usage(2) if     ($OPTIONS{'help'});
+pod2usage(2) unless ($OPTIONS{'check'});
+
+# Yay for versions
+if ($OPTIONS{'version'}) {
+    print "$VERSION\n";
+    exit $ERRORS{'OK'};
+}
+
+# Verify valid command to check
+if (grep {/^$OPTIONS{'check'}$/} @COMMANDS) {
+    $OPTIONS{'check'} =~ /^(.*)$/;
+    $OPTIONS{'check'} = $1;
+} else {
+    print "UNKNOWN: $OPTIONS{'check'} is unrecognized\n";
+    exit $ERRORS{'UNKNOWN'};
+}
+
+# Set global defaults/validate options
+$OPTIONS{'timeout'} = $OPTIONS{'timeout'} ? $OPTIONS{'timeout'} : 10000;
+$OPTIONS{'verbose'} = $OPTIONS{'verbose'} ? $OPTIONS{'verbose'} : 1;
+validate_input(\%OPTIONS, 'timeout', 'seconds');
+
+$OPTIONS{'key'}   = $OPTIONS{'key'}   ? 
+                        $OPTIONS{'key'}   : 'NAGIOS_KEY'.uc($OPTIONS{'check'});
+$OPTIONS{'value'} = $OPTIONS{'value'} ? 
+                        $OPTIONS{'value'} : 'NAGIOS_VALUE'.uc($OPTIONS{'check'});
+
+# Clean up args (remove leading/trailing space)
+# 'foo = bar' becomes 'foo ' => ' bar' becomes 'foo' => 'bar'
+%ARGS = map({$a=$ARGS{$_}; $a=~s/^\s+//g; s/\s+$//g; $_=>$a} keys(%ARGS));
+
+################################################################################
+# Begin the main program
+################################################################################
+
+# Set defaults/validate options
+$OPTIONS{'host'} = $OPTIONS{'host'} ? $OPTIONS{'host'} : 'localhost';
+$OPTIONS{'port'} = $OPTIONS{'port'} ? $OPTIONS{'port'} : '6379';
+validate_input(\%OPTIONS, 'host', 'hostname');
+validate_input(\%OPTIONS, 'port', 'port');
+
+my $r;
+# Attempt connection
+eval {
+    local $SIG{ALRM} = sub { die 'TIMEOUT' };
+    ualarm($OPTIONS{'timeout'});
+
+    $r = Redis->new( server => $OPTIONS{'host'}.':'.$OPTIONS{'port'}, 
+                     debug  => $OPTIONS{'verbose'} - 1 );
+
+    ualarm(0);
+};
+ualarm(0);
+
+# Check for timeout
+if ( $@ ) {
+    print "CRITICAL: Could not connect to Redis";
+    print " in $OPTIONS{'timeout'} microseconds" if ($@ eq "TIMEOUT");
+    print "\n";
+    print $@ if ($OPTIONS{'verbose'} > 2);
+    exit $ERRORS{'CRITICAL'};
+}
+
+################################################################################
+# Begin check processing
+################################################################################
+
+my $check = $OPTIONS{'check'};
+
+# Connect check
+if ( $check eq 'connect' ) {
+    print "OK: Redis is accepting connections\n";
+    exit $ERRORS{'OK'};
+}
+
+eval "check_$check";
+
+################################################################################
+# Subroutines and helpers
+################################################################################
+
+# Validate user input
+sub validate_input {
+    my ($hash, $key, $type) = @_;
+
+    # Percent - positive integers 0-100 optionally ending in '%'
+    if ($type eq 'percent') {
+        $hash->{$key} =~ s/\%$//;
+        if ($hash->{$key} =~ /^(\d+)$/) {
+            $hash->{$key} = $1;
+        } else {
+            print "UNKNOWN: '$key' should contain a positive integer (in percent)\n";
+            exit $ERRORS{'UNKNOWN'};
+        }
+        unless ($hash->{$key} <= 100) {
+            print "UNKNOWN: '$key' should be within 0-100%";
+            exit $ERRORS{'UNKNOWN'};
+        }
+
+    # Seconds - positive intgers optionally ending in 's'
+    } elsif ($type eq 'seconds') {
+        $hash->{$key} =~ s/s$//;
+        if ($hash->{$key} =~ /(\d+)$/) {
+            $hash->{$key} = $1;
+        } else {
+            print "UNKNOWN: '$key' should contain a positive integer (in seconds)\n";
+            exit $ERRORS{'UNKNOWN'};
+        }
+
+    # Port - positive integers
+    } elsif ($type eq 'port') {
+        if ($hash->{$key} =~ /^(\d+)$/) {
+            $hash->{$key} = $1;
+        } else {
+            print "UNKNOWN: '$key' should contain a TCP port\n";
+            exit $ERRORS{'UNKNOWN'};
+        }
+
+    # Host - any string only containing \w, '-', '.'
+    } elsif ($type eq 'hostname') {
+        if ($hash->{$key} =~ /^([\w\-\.]+)$/) {
+            $hash->{$key} = $1;
+        } else {
+            print "UNKNOWN: '$key' should contain a valid hostname\n";
+            exit $ERRORS{'UNKNOWN'};
+        }
+
+    # Bytes - positive integers
+    } elsif ($type eq 'bytes') {
+        if ($hash->{$key} =~ /^(\d+)$/) {
+            $hash->{$key} = $1;
+        } else {
+            print "UNKNOWN: '$key' should be in bytes\n";
+            exit $ERRORS{'UNKNOWN'};
+        }
+
+    # Uh oh...
+    } else {
+        print "UNKNOWN: Internal error, unable to verify '$key'\n";
+        exit $ERRORS{'UNKNOWN'};
+    }
+}
+
+################################################################################
+# Checks
+################################################################################
+
+sub check_connect {
+    print "OK: Redis accepting connections\n";
+    exit $ERRORS{'OK'};
+}
+
+sub check_get {
+    eval {
+        local $SIG{ALRM} = sub { die 'TIMEOUT' };
+        ualarm($OPTIONS{'timeout'});
+
+        # Do the thing
+        if(my $k = $r->get($OPTIONS{'key'})) {
+            if (!$k) {
+                print "CRITICAL: key $OPTIONS{'key'} does not exist\n";
+                exit $ERRORS{'CRITICAL'}; 
+            }
+        } else {
+            print "UNKNOWN: Couldn't Redis->get($OPTIONS{'key'})\n";
+            exit $ERRORS{'UNKNOWN'}; 
+        } 
+
+        ualarm(0); 
+    };
+    ualarm(0);
+
+    # Check for timeout
+    if ( $@ ) {
+        print "CRITICAL: Could not get() in $OPTIONS{'timeout'} seconds";
+        print " in $OPTIONS{'timeout'} microseconds" if ($@ eq "TIMEOUT");
+        print "\n";
+        print $@ if ($OPTIONS{'verbose'} > 2);
+        exit $ERRORS{'CRITICAL'};
+    }
+
+    print "OK: get($OPTIONS{'key'})\n";
+    exit $ERRORS{'OK'};
+}
+
+sub check_set {
+    eval {
+        local $SIG{ALRM} = sub { die 'TIMEOUT' };
+        ualarm($OPTIONS{'timeout'});
+
+        # Do the thing
+        if(!$r->set($OPTIONS{'key'} => "$OPTIONS{'value'}")) {
+            print "UNKNOWN: set $OPTIONS{'key'} to $OPTIONS{'value'}\n";
+            exit $ERRORS{'UNKNOWN'};
+        }
+
+        ualarm(0);
+    };
+    ualarm(0);
+
+    # Check for timeout
+    if ( $@ ) {
+        print "CRITICAL: Could not set() in $OPTIONS{'timeout'} seconds";
+        print " in $OPTIONS{'timeout'} microseconds" if ($@ eq "TIMEOUT");
+        print "\n";
+        print $@ if ($OPTIONS{'verbose'} > 2);
+        exit $ERRORS{'CRITICAL'};
+    }
+
+    print "OK: set($OPTIONS{'key'} => $OPTIONS{'value'})\n";
+    exit $ERRORS{'OK'};
+}
+
+sub check_setnx {
+    my $rc;
+    eval {
+        local $SIG{ALRM} = sub { die 'TIMEOUT' };
+        ualarm($OPTIONS{'timeout'});
+
+        # Do the thing
+        $r->setnx($OPTIONS{'key'} => "$OPTIONS{'value'}");
+        $rc = $?;
+        ualarm(0);
+    };
+    ualarm(0);
+
+    # Check for timeout
+    if ( $@ ) {
+        print "CRITICAL: Could not set() in $OPTIONS{'timeout'} seconds";
+        print " in $OPTIONS{'timeout'} microseconds" if ($@ eq "TIMEOUT");
+        print "\n";
+        print $@ if ($OPTIONS{'verbose'} > 2);
+        exit $ERRORS{'CRITICAL'};
+    }
+ 
+    my $msg = "SET" if ($rc == 1);
+    $msg = "NOT SET" if ($rc == 0);
+
+    if ($rc != 0 && $rc != 1) {
+        print "UNKNOWN: setnx returned $rc\n";
+        exit $ERRORS{'UNKNOWN'};
+    }
+
+    print "OK: setnx $OPTIONS{'key'} => $OPTIONS{'value'}\nValue was $msg\n";
+    exit $ERRORS{'OK'};
+}
+
+=pod
+
+=head1 NAME
+
+check_redis - Nagios checks for Redis
+
+=head1 SYNOPSIS
+
+ check_redis -K <check_name> [options]
+
+ Options:
+   -K, --check=<check_name>  The check to run
+   --cnf=<config file>       Optional my.cnf to read username/pass/etc
+   -c, --critical=<limit>    The level at which a critical alarm is raised.
+   -d, --database=<dbname>   The database to use
+   -h, --help                Display this message and exit
+   -H, --host=<hostname>     The target MySQL server host
+   -p, --password=<password> The password of the MySQL user
+   --port=<portnum>          The port MySQL is listening on
+   -s, --socket=<sockfile>   Use the specified mysql unix socket to connect
+   -t, --timeout=<timeout>   Seconds before connection/query attempts timeout
+   -u, --username=<username> The MySQL user used to connect
+   -v, --verbose             Increase verbosity level
+   -V, --version             Display version information and exit
+   -w, --warning             The level at which a warning is raised.
+
+ Defaults are:
+
+ ATTRIBUTE                  VALUE
+ -------------------------- ------------------
+ args                       No default value
+ check                      No default value
+ cnf                        No default value
+ critical                   Check-specific
+ database                   No default value
+ help                       FALSE
+ host                       localhost
+ password                   No default value
+ port                       6379
+ socket                     No default value
+ timeout                    10 seconds
+ username                   No default value
+ verbose                    1 (out of 3)
+ version                    FALSE
+ warning                    Check-specific
+
+ The following checks are supported:
+
+ connect repl_io repl_sql repl_sbm repl_all mysql_query connections table_status
+ myisam_frag
+
+=head1 OPTIONS
+
+=over
+
+=item I<--args>|I<-a>
+
+Optional additional arguments for a particular check. Always takes the format 
+C<--args 'foo=bar'>. Check specific and can be repeated as often as necessary.
+
+=item I<--check>|I<-K>
+
+The check to run, see L<CHECKS> section for details. Only one check may be 
+specified at a time.
+
+=item I<--cnf>
+
+An optional my.cnf to read for username/password.  Reads the [client] section
+
+=item I<--critical>|I<-c>
+
+The level at which a critical alarm is raised. Check-specific.
+
+=item I<--database>|I<-d>
+
+The database to use. No default value, will connect without a database if 
+not specified.
+
+=item I<--help>|I<-h>
+
+Display a short help message and exit.
+
+=item I<--host>|I<-H>
+
+The target MySQL server host.
+
+=item I<--password>|I<-p>
+
+The password of the MySQL user.
+
+=item I<--port>
+
+The port MySQL is listening on.
+
+=item I<--socket>|I<-s>
+
+Use the specified unix socket to connect with. Ignored if --host is specified 
+or is anything except 'localhost'.
+
+=item I<--timeout>|I<-t>
+
+Seconds before connection/query attempts timeout. Note that this does B<NOT>
+mean that the whole plugin will timeout in this interval, just the initial
+connection and each subsequent db query. The C<mysql_query> check has also has
+a separate timeout for the test query in case a different timeout is desired.
+
+=item I<--username>|I<-u>
+
+The MySQL user used to connect
+
+=item I<--verbose>|I<-v>
+
+Increase verbosity level. Can be used up to three times.
+
+=item I<--version>|I<-V>
+
+Display version information and exit.
+
+=item I<--warning>|I<-w>
+
+The level at which a warning is raised.  Check-specific.
+
+=back
+
+=head1 CHECKS
+
+=over
+
+=item B<connect>
+
+Checks connectivity to the target database server.
+Returns CRITICAL if not able to connect, OK otherwise.
+    Permissions required: USAGE
+    I<--args> => ignored
+    I<--warning> => ignored
+    I<--critical> => ignored
+
+=item B<repl_io>
+
+Checks whether on not the IO Replication thread is running.
+Returns CRITICAL if not running, OK otherwise.
+    Permissions required: REPLICATION CLIENT
+    I<--args> => ignored
+    I<--warning> => ignored
+    I<--critical> => ignored
+
+=item B<repl_sql>
+
+Check to see whether or not the SQL Replication thread is running.
+Returns CRITICAL if not running, OK otherwise.
+    Permissions required: REPLICATION CLIENT
+    I<--args> => ignored
+    I<--warning> => ignored
+    I<--critical> => ignored
+
+=item B<repl_sbm>
+
+Check how many seconds behind the master the slave is.
+    Permissions required: REPLICATION CLIENT
+    I<--args> => ignored
+    I<--warning> => default 30 seconds
+    I<--critical> => default 60 seconds
+
+=item B<repl_all>
+
+Combine repl_io, repl_sql, and repl_sbm checks into one.
+Returns CRITICAL on failure of IO or SQL threads or if seconds behind master is 
+greater than the limit.
+Returns WARNING only if seconds behind master is greater than the limit.
+    Permissions required: REPLICATION CLIENT
+    I<--args> => ignored
+    I<--warning> => default 30 seconds
+    I<--critical> => default 60 seconds
+
+=item B<mysql_query>
+
+Run a given query, test if it executes properly.
+Returns CRITICAL if the query fails to execute for whatever reason, OK 
+otherwise.
+    Permissions required: depends on the query
+    I<--args> => no default:
+        C<query=...> => the query to run
+        C<query_timeout=...> => optional query timeout (default 30 seconds)
+    I<--warning> => ignored
+    I<--critical> => ignored
+
+=item B<connections>
+
+Test if the percentage of used connections is over a given threshold.
+    Permissions required: PROCESS
+    I<--args> => ignored
+    I<--warning> => default 80%
+    I<--critical> => default 90%
+
+=item B<table_status>
+
+Test all tables in a given database for errors, or all tables in all databases 
+if I<--database> is not given. Returns CRITICAL if any table has an error, OK
+otherwise.
+    Permissions required: SELECT
+    I<--args> => ignored
+    I<--warning> => ignored
+    I<--critical> => ignored
+
+=item B<myisam_frag>
+
+Test all tables in a given database for fragmentation, or all tables in all databases 
+if I<--database> is not given.
+    Permissions required: SELECT
+    I<--args> => no default:
+        C<tables=...> => comma separated list of tables to check 
+                      Tables matched with regex in C<db.table> format
+        C<ignore=...> => comma separated list of tables to ignore 
+                      Tables matched with regex in C<db.table> format
+                      Ignore tables are matched after check tables
+        C<minsize=...> => minimum size of table to check in bytes
+    I<--warning> => default 25%
+    I<--critical> => default 30%
+
+=back
+
+=head1 SYSTEM REQUIREMENTS
+
+check_redis requires the following Perl modules:
+
+  Pod::Usage
+  Getopt::Long
+  Redis
+
+=head1 BUGS
+
+Please report all bugs and feature requests to 
+http://code.google.com/p/check-mysql-all
+
+=head1 LICENSE
+
+This program is copyright (c) 2009 Ryan Lowe.
+Feedback and improvements are welcome (ryan.a.lowe@percona.com).
+
+THIS PROGRAM IS PROVIDED "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED
+WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
+MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+
+This program is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 2; OR the Perl Artistic License.  On UNIX and similar
+systems, you can issue `man perlgpl' or `man perlartistic' to read these
+licenses.
+
+You should have received a copy of the GNU General Public License along with
+this program; if not, write to the Free Software Foundation, Inc., 59 Temple
+Place, Suite 330, Boston, MA  02111-1307 USA.
+
+=head1 AUTHOR
+
+Ryan Lowe (ryan.a.lowe@percona.com)
+
+=head1 VERSION
+
+This manual page documents 0.0.1 of check_redis
+
+=cut
+
