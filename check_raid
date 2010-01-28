@@ -21,7 +21,7 @@ use lib "/usr/lib/nagios/plugins";
 use lib "/usr/lib64/nagios/plugins";
 use utils qw(%ERRORS);
 
-my $VERSION = '0.0.1';
+my $VERSION = '0.0.2';
 my %OPTIONS;
 my %ARGS;
 my @CONTROLLERS = qw(3ware);
@@ -77,7 +77,7 @@ eval "check_$OPTIONS{controller}_info;";
 ################################################################################
 
 sub check_3ware_info {
-
+	print "subcalled\n";
     # Verify tw_cli is installed and in our path
     if (!`which tw_cli`) {
         print "UNKNOWN: tw_cli could not be found or executed\n";
@@ -91,7 +91,7 @@ sub check_3ware_info {
         my $bbustatus = `tw_cli /$OPTIONS{'cid'}/bbu show all`;
 
     } 
-      $result .= ($tw_cli =~ /^\/c0\s*(Model.*\n)/m ? $1 : '');
+      my $result .= (my $tw_cli =~ /^\/c0\s*(Model.*\n)/m ? $1 : '');
       $result .= ($tw_cli =~ /^\/c0\s*(Memory Installed.*\n)/m ? $1 : '');
       $result .= ($tw_cli =~ /\n(\n.*)/ms ? $1 : '');
       $result =~ s/^/   /mg;
@@ -109,11 +109,12 @@ check_raid - Nagios checks for various raid controllers
 
 =head1 SYNOPSIS
 
- check_raid -C <controller_name> [options]
+ check_raid -C <controller_name> -cid=<ID> [options]
 
  Options:
    -b, --bbu                          Check for BBU 
    -C, --controller=<controller_name> The controller
+   -cid                               The controller's ID 
    -h, --help                         Display this message and exit
    -v, --verbose                      Increase verbosity level
    -V, --version                      Display version information and exit
@@ -124,6 +125,7 @@ check_raid - Nagios checks for various raid controllers
  -------------------------- ------------------
  bbu                        FALSE
  controller                 No default value
+ cid                        No default value
  help                       FALSE
  verbose                    1 (out of 3)
  version                    FALSE
