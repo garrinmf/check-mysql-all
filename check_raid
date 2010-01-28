@@ -1,0 +1,177 @@
+#!/usr/bin/perl
+
+# DO NOT USE EMBEDDED PERL
+# nagios: -epn
+
+################################################################################
+# check_raid - Nagios Plug-In for typical RAID card checks
+#
+# @author  Ryan Lowe <ryan.a.lowe@percona.com>
+# @date    2010-01-24
+# @license GPL v2
+################################################################################
+
+use strict;
+use warnings FATAL => 'all';
+use Pod::Usage;
+use Getopt::Long;
+use English qw(-no_match_vars);
+use lib "/usr/local/nagios/libexec";
+use lib "/usr/lib/nagios/plugins";
+use lib "/usr/lib64/nagios/plugins";
+use utils qw(%ERRORS);
+
+my $VERSION = '0.0.1';
+my %OPTIONS;
+my %ARGS;
+my @CONTROLLERS = qw(3ware);
+
+################################################################################
+# Get configuration information
+################################################################################
+
+# Parse command line opts
+my $gop=new Getopt::Long::Parser;
+$gop->configure('no_ignore_case','bundling');
+if (!$gop->getoptions(
+    'bbu|b'          => \$OPTIONS{'bbu'       },
+    'cid=s'          => \$OPTIONS{'cid'       },
+    'controller|C=s' => \$OPTIONS{'controller'},
+    'help|h'         => \$OPTIONS{'help'      },
+    'verbose|v+'     => \$OPTIONS{'verbose'   },
+    'version|V'      => \$OPTIONS{'version'   } ) ) {
+
+    pod2usage(2);
+}
+
+# Help if asked for or no check given
+pod2usage(2) if     ($OPTIONS{'help'      });
+pod2usage(2) unless ($OPTIONS{'cid'       });
+pod2usage(2) unless ($OPTIONS{'controller'});
+
+# Yay for versions
+if ($OPTIONS{'version'}) {
+    print "$VERSION\n";
+    exit $ERRORS{'OK'};
+}
+
+# Verify valid controller
+if (grep {/^$OPTIONS{'controller'}$/} @CONTROLLERS) {
+    $OPTIONS{'controller'} =~ /^(.*)$/;
+    $OPTIONS{'controller'} = $1;
+} else {
+    print "UNKNOWN: Controller $OPTIONS{'controller'} is unrecognized\n";
+    exit $ERRORS{'UNKNOWN'};
+}
+
+$OPTIONS{'verbose'} = $OPTIONS{'verbose'} ? $OPTIONS{'verbose'} : 1;
+
+################################################################################
+# Begin the main program
+################################################################################
+
+eval "check_$OPTIONS{controller}_info;"; 
+
+################################################################################
+# Subroutines for each RAID card
+################################################################################
+
+sub check_3ware_info {
+
+    # Verify tw_cli is installed and in our path
+    if (!`which tw_cli`) {
+        print "UNKNOWN: tw_cli could not be found or executed\n";
+        exit $ERRORS{'UNKNOWN'};
+    }
+
+    if (!$OPTIONS{'bbu'}) {
+        my $drivestatus = `tw_cli /$OPTIONS{'cid'} show drivestatus`;
+
+    } else {
+        my $bbustatus = `tw_cli /$OPTIONS{'cid'}/bbu show all`;
+
+    } 
+      $result .= ($tw_cli =~ /^\/c0\s*(Model.*\n)/m ? $1 : '');
+      $result .= ($tw_cli =~ /^\/c0\s*(Memory Installed.*\n)/m ? $1 : '');
+      $result .= ($tw_cli =~ /\n(\n.*)/ms ? $1 : '');
+      $result =~ s/^/   /mg;
+}
+
+################################################################################
+# Documentation
+################################################################################
+
+=pod
+
+=head1 NAME
+
+check_raid - Nagios checks for various raid controllers
+
+=head1 SYNOPSIS
+
+ check_raid -C <controller_name> [options]
+
+ Options:
+   -b, --bbu                          Check for BBU 
+   -C, --controller=<controller_name> The controller
+   -h, --help                         Display this message and exit
+   -v, --verbose                      Increase verbosity level
+   -V, --version                      Display version information and exit
+
+ Defaults are:
+
+ ATTRIBUTE                  VALUE
+ -------------------------- ------------------
+ bbu                        FALSE
+ controller                 No default value
+ help                       FALSE
+ verbose                    1 (out of 3)
+ version                    FALSE
+
+ The following checks are supported:
+
+ 3ware
+
+=head1 SYSTEM REQUIREMENTS
+
+check_raid requires the following Perl modules:
+
+  Pod::Usage
+  Getopt::Long
+
+=head1 BUGS
+
+Please report all bugs and feature requests to
+http://code.google.com/p/check-mysql-all
+
+=head1 LICENSE
+
+This program is copyright (c) 2009 Ryan Lowe.
+Feedback and improvements are welcome (ryan.a.lowe@percona.com).
+
+THIS PROGRAM IS PROVIDED "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED
+WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
+MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+
+This program is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 2; OR the Perl Artistic License.  On UNIX and similar
+systems, you can issue `man perlgpl' or `man perlartistic' to read these
+licenses.
+
+You should have received a copy of the GNU General Public License along with
+this program; if not, write to the Free Software Foundation, Inc., 59 Temple
+Place, Suite 330, Boston, MA  02111-1307 USA.
+
+=head1 AUTHOR
+
+Ryan Lowe (ryan.a.lowe@percona.com)
+
+=head1 VERSION
+
+This manual page documents 0.0.1 of check_raid
+
+=cut
+
+
+
