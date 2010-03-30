@@ -413,6 +413,87 @@ sub check_mysql_query {
         alarm($args->{'query_timeout'});
 
         my $r = $dbh->selectall_hashref($args->{'query'}, 1); 
+
+        if ($args->{'valid_count'}) {
+            if ($args->{'valid_count'} == scalar(keys %$r)) { 
+                print "OK: $args->{'valid_count'} records returned\n";
+                exit $ERRORS{'OK'};
+            } else {
+                print "CRITICAL: ".scalar(keys %$r)." records returned\n";
+                exit $ERRORS{'CRITICAL'};
+            }
+        }
+       
+        if ($args->{'max_count'}) {
+            if (scalar(keys %$r) le $args->{'max_count'}) {
+                print "OK: ".scalar(keys %$r)." records returned\n";
+                exit $ERRORS{'OK'};
+            } else {
+                print "CRITICAL: ".scalar(keys %$r)." records returned\n";
+                exit $ERRORS{'CRITICAL'};
+            }
+        }
+
+        if ($args->{'min_count'}) {
+            if (scalar(keys %$r) gt $args->{'min_count'}) {
+                print "OK: ".scalar(keys %$r)." records returned\n";
+                exit $ERRORS{'OK'};
+            } else {
+                print "CRITICAL: ".scalar(keys %$r)." records returned\n";
+                exit $ERRORS{'CRITICAL'};
+            }
+        }
+
+        my @keys = keys %$r;
+        my $key = $keys[0];
+
+        if ($args->{'valid_val'}) {
+            if (scalar(keys %$r) ne 1) {
+                print "CRITICAL: ".scalar(keys %$r)." records returned\n";
+                exit $ERRORS{'CRITICAL'};
+            }
+
+            if ($key eq $args->{'valid_val'}) {
+                print "OK: $key was returned\n";
+                exit $ERRORS{'OK'};
+            } else {
+                print "CRITICAL: $key was returned\n";
+                exit $ERRORS{'CRITICAL'};
+            }
+        }
+
+        if ($args->{'max_val'}) {
+            if (scalar(keys %$r) ne 1) {
+                print "CRITICAL: ".scalar(keys %$r)." records returned\n";
+                exit $ERRORS{'CRITICAL'};
+            }
+
+            if ($key lt $args->{'max_val'}) {
+                print "OK: $key was returned\n";
+                exit $ERRORS{'OK'};
+            } else {
+                print "CRITICAL: $key was returned\n";
+                exit $ERRORS{'CRITICAL'};
+            }
+
+        }
+
+        if ($args->{'min_val'}) {
+            if (scalar(keys %$r) ne 1) {
+                print "CRITICAL: ".scalar(keys %$r)." records returned\n";
+                exit $ERRORS{'CRITICAL'};
+            }
+
+            if ($key gt $args->{'min_val'}) {
+                print "OK: $key was returned\n";
+                exit $ERRORS{'OK'};
+            } else {
+                print "CRITICAL: $key was returned\n";
+                exit $ERRORS{'CRITICAL'};
+            }
+
+        }
+ 
         alarm(0);
     };
     alarm(0);
@@ -426,7 +507,9 @@ sub check_mysql_query {
         print $@ if ($opts->{verbose} > 2);
         exit $ERRORS{'CRITICAL'};
     }
-    
+   
+    #print($r);
+ 
     print "OK: Query Executed Successfully\n";
     exit $ERRORS{'OK'};
 }
@@ -762,6 +845,12 @@ otherwise.
     I<--args> => no default:
         C<query=...> => the query to run
         C<query_timeout=...> => optional query timeout (default 30 seconds)
+        C<max_val=...> => the maximum allowable value (single result) (inclusive)
+        C<min_val=...> => the minumum allowable value (single result) (inclusive)
+        C<valid_val=...> => if only one value is correct, this is it (single result)
+        C<max_count=...> => the maximum allowable number of returned rows (inclusive)
+        C<min_count=...> => the minimum allowable number of returned rows (inclusive)
+        C<valid_count=...> => if the number of values returned must be fixed
     I<--warning> => ignored
     I<--critical> => ignored
 
@@ -839,7 +928,7 @@ Ryan Lowe (ryan.a.lowe@percona.com)
 
 =head1 VERSION
 
-This manual page documents 0.0.8 of check_mysql_all
+This manual page documents 0.0.9 of check_mysql_all
 
 =cut
 
