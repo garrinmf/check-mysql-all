@@ -447,6 +447,11 @@ sub check_mysql_query {
         my @keys = keys %$r;
         my $key = $keys[0];
 
+        if (scalar(keys %$r) == 0) {
+            print "$args->{'zero_results'}: 0 records returned\n";
+            exit $ERRORS{'CRITICAL'};
+        }
+
         if ($args->{'valid_val'}) {
             if (scalar(keys %$r) ne 1) {
                 print "CRITICAL: ".scalar(keys %$r)." records returned\n";
@@ -851,6 +856,7 @@ otherwise.
         C<max_count=...> => the maximum allowable number of returned rows (inclusive)
         C<min_count=...> => the minimum allowable number of returned rows (inclusive)
         C<valid_count=...> => if the number of values returned must be fixed
+        C<zero_results=[OK|WARNING|CRITICAL]> => return value if zero results are returned
     I<--warning> => ignored
     I<--critical> => ignored
 
