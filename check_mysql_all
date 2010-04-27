@@ -450,7 +450,7 @@ sub check_mysql_query {
         if (scalar(keys %$r) == 0) {
             $args->{'zero_results'} = $args->{'zero_results'} ? $args->{'zero_results'} : 'CRITICAL';
             print "$args->{'zero_results'}: 0 records returned\n";
-            exit $ERRORS{'CRITICAL'};
+            exit $ERRORS{$args->{'zero_results'}};
         }
 
         if ($args->{'valid_val'}) {
