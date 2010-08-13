@@ -159,10 +159,19 @@ if ( $mmm_cmd ) {
         my $msg = "CRITICAL: MMM Daemon is not running";
         report_error($msg, $ERRORS{'CRITICAL'});
     }
+    #v2 ERROR Monitor message changed
+    if ($mmm_output =~ /ERROR: Can’t connect to monitor daemon/) {
+    my $msg = "CRITICAL: MMM Monitor Daemon is not running";
+    report_error($msg, $ERRORS{‘CRITICAL’});
+    }
 	#mmm2 extend
     if ($mmm_output =~ m/passive/i) {
         my $msg = "CRITICAL: MMM Daemon is in passive mode";
         report_error($msg, $ERRORS{'WARNING'});
+    }
+    if ($mmm_output =~ m/agent/i) {
+    my $msg = "CRITICAL: MMM Agent Daemon is NOT running on ALL DB in the cluster";
+    report_error($msg, $ERRORS{‘CRITICAL’});
     }
 
     foreach my $state (@criticals) {
