@@ -21,7 +21,7 @@ use lib "/usr/lib/nagios/plugins";
 use lib "/usr/lib64/nagios/plugins";
 use utils qw(%ERRORS);
 
-my $VERSION = '0.0.9';
+my $VERSION = '0.1.0';
 my %OPTIONS;
 my @STATES = qw(ADMIN_OFFLINE HARD_OFFLINE AWAITING_RECOVERY 
                 REPLICATION_FAIL REPLICATION_DELAY);
@@ -160,7 +160,7 @@ if ( $mmm_cmd ) {
         report_error($msg, $ERRORS{'CRITICAL'});
     }
     #v2 ERROR Monitor message changed
-    if ($mmm_output =~ /ERROR: Can’t connect to monitor daemon/) {
+    if ($mmm_output =~ /ERROR: Can\’t connect to monitor daemon/) {
     my $msg = "CRITICAL: MMM Monitor Daemon is not running";
     report_error($msg, $ERRORS{'CRITICAL'});
     }
@@ -290,7 +290,7 @@ Istvan Podor (istvan.podor@percona.com) -- nsca extension
 
 =head1 VERSION
 
-This manual page documents 0.0.9 of check_mmm
+This manual page documents 0.1.0 of check_mmm
 
 =cut
 
