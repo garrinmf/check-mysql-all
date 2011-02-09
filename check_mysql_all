@@ -22,7 +22,7 @@ use lib "/usr/lib/nagios/plugins";
 use lib "/usr/lib64/nagios/plugins";
 use utils qw(%ERRORS);
 
-my $VERSION = '0.0.9';
+my $VERSION = '0.1.0';
 my @CHECKS = qw(connect repl_io repl_sql repl_sbm repl_all 
                 mysql_query connections table_status myisam_frag);
 my @REPL_CHECKS = qw(repl_io repl_sql repl_sbm repl_all);
@@ -256,14 +256,13 @@ sub get_slave_status {
 sub get_db_info {
     my ($dbh, $opts) = @_;
 
-    my ($processlist, $variables, $status, $dbs);
+    my ($processlist, $variables, $dbs);
     eval {
         local $SIG{ALRM} = sub { die 'TIMEOUT' };
         alarm($OPTIONS{'timeout'});
 
         $processlist = $dbh->selectall_hashref('SHOW FULL PROCESSLIST', 1);
         $variables   = $dbh->selectall_hashref('SHOW GLOBAL VARIABLES', 1);
-        $status      = $dbh->selectall_hashref('SHOW /*!50002 GLOBAL */ STATUS', 1);
         $dbs         = $dbh->selectcol_arrayref("SHOW DATABASES");
         alarm(0);
     };
@@ -279,7 +278,7 @@ sub get_db_info {
         exit $ERRORS{'UNKNOWN'};
     }
  
-    return ($processlist, $variables, $status, $dbs);
+    return ($processlist, $variables, $dbs);
 }
 
 # Return table status
@@ -397,7 +396,7 @@ sub check_repl_all {
 
 # Mysql query check
 sub check_mysql_query {
-    my ($dbh, $opts, $args, $processlist, $variables, $status, $dbs) = @_;
+    my ($dbh, $opts, $args, $processlist, $variables, $dbs) = @_;
 
     # Validate args
     if (!$args->{'query'}) {
@@ -522,7 +521,7 @@ sub check_mysql_query {
 
 # Connection usage check
 sub check_connections {
-    my ($dbh, $opts, $args, $processlist, $variables, $status, $dbs) = @_;
+    my ($dbh, $opts, $args, $processlist, $variables, $dbs) = @_;
 
     $opts->{'warning'}  = $opts->{'warning'}  ? $opts->{'warning'}  : 80;
     $opts->{'critical'} = $opts->{'critical'} ? $opts->{'critical'} : 90;
@@ -549,7 +548,7 @@ sub check_connections {
 
 # Table status check
 sub check_table_status {
-    my ($dbh, $opts, $args, $processlist, $variables, $status, $dbs) = @_;
+    my ($dbh, $opts, $args, $processlist, $variables, $dbs) = @_;
 
     my @check_dbs = $opts->{'database'} ? ($opts->{'database'}) : @{ $dbs };
     my $tables_status = get_table_status($dbh, $opts, \@check_dbs);
@@ -563,7 +562,7 @@ sub check_table_status {
                 push(@errs, "$db.$table marked as crashed");
             } elsif (/(err(?:code|no):\s\d+)/i) {
                 push(@errs, "$db.$table has an error ($1)");
-            } elsif (! defined($tables_status->{$db}{$table}{'Rows'})) {
+            } elsif (! defined($tables_status->{$db}{$table}{'Rows'}) && $tables_status->{$db}{$table}{'Comment'} ne 'VIEW') {
                 push(@errs, "$db.$table is corrupted");
             }
         }
@@ -585,7 +584,7 @@ sub check_table_status {
  
 # Myiasm fragmentation check
 sub check_myisam_frag {
-    my ($dbh, $opts, $args, $processlist, $variables, $status, $dbs) = @_;
+    my ($dbh, $opts, $args, $processlist, $variables, $dbs) = @_;
 
     # Validate limits/args
     $opts->{'warning'}  = $opts->{'warning'}  ? $opts->{'warning'}  : 25;
@@ -935,7 +934,7 @@ Ryan Lowe (ryan.a.lowe@percona.com)
 
 =head1 VERSION
 
-This manual page documents 0.0.9 of check_mysql_all
+This manual page documents 0.1.0 of check_mysql_all
 
 =cut
 
