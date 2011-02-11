@@ -1,0 +1,584 @@
+#!/usr/bin/perl 
+
+# DO NOT USE EMBEDDED PERL
+# nagios: -epn
+
+################################################################################
+# check_handlersocket - Nagios Plug-In for typical HandlerSocket checks.
+#
+# @author  Ryan Lowe <ryan.a.lowe@percona.com>
+# @date    2011-02-10
+# @license GPL v2
+#
+################################################################################
+
+use strict;
+use warnings FATAL => 'all';
+use Pod::Usage;
+use Getopt::Long;
+use Net::HandlerSocket;
+use English qw(-no_match_vars);
+use Time::HiRes qw(gettimeofday tv_interval ualarm);
+use lib "/usr/local/nagios/libexec";
+use lib "/usr/lib/nagios/plugins";
+use lib "/usr/lib64/nagios/plugins";
+use utils qw(%ERRORS);
+
+my $VERSION = '0.0.1';
+my @CHECKS = qw(read_connect write_connect read_exec delete_exec);
+my %OPTIONS;
+my %ARGS;
+                
+################################################################################
+# Get configuration information
+################################################################################
+
+# Parse command line opts
+my $gop=new Getopt::Long::Parser;
+$gop->configure('no_ignore_case','bundling');
+if (!$gop->getoptions(
+    'check|K=s'     => \$OPTIONS{'check'       },
+    'columns=s'     => \$OPTIONS{'columns'     },
+    'critical|c=s'  => \$OPTIONS{'critical'    },
+    'database|d=s'  => \$OPTIONS{'database'    },
+    'help|h'        => \$OPTIONS{'help'        },
+    'hostname|H=s'  => \$OPTIONS{'host'        },
+    'index=s'       => \$OPTIONS{'index'       },
+    'index-value=s' => \$OPTIONS{'index-value' },
+    'limit=i'       => \$OPTIONS{'limit'       },
+    'offset=i'      => \$OPTIONS{'offset'      },
+    'port=i'        => \$OPTIONS{'port'        },
+    'socket|s=s'    => \$OPTIONS{'socket'      },
+    'table|T=s'     => \$OPTIONS{'table'       },
+    'timeout|t=i'   => \$OPTIONS{'timeout'     },
+    'verbose|v+'    => \$OPTIONS{'verbose'     },
+    'version|V'     => \$OPTIONS{'version'     },
+    'warning|w=s'   => \$OPTIONS{'warning' } ) ) {
+
+    pod2usage(2);
+}
+
+# Help if asked for or no check given
+pod2usage(2) if     ($OPTIONS{'help'});
+pod2usage(2) unless ($OPTIONS{'check'});
+
+# Yay for versions
+if ($OPTIONS{'version'}) {
+    print "$VERSION\n";
+    exit $ERRORS{'OK'};
+}
+
+# Verify valid command to check
+if (grep {/^$OPTIONS{'check'}$/} @CHECKS) {
+    $OPTIONS{'check'} =~ /^(.*)$/;
+    $OPTIONS{'check'} = $1;
+} else {
+    print "UNKNOWN: $OPTIONS{'check'} is unrecognized\n";
+    exit $ERRORS{'UNKNOWN'};
+}
+
+# Set global defaults/validate options
+$OPTIONS{'timeout'} = $OPTIONS{'timeout'} ? $OPTIONS{'timeout'} : 10000;
+$OPTIONS{'verbose'} = $OPTIONS{'verbose'} ? $OPTIONS{'verbose'} : 1;
+validate_input(\%OPTIONS, 'timeout', 'seconds');
+
+# Clean up args (remove leading/trailing space)
+# 'foo = bar' becomes 'foo ' => ' bar' becomes 'foo' => 'bar'
+%ARGS = map({$a=$ARGS{$_}; $a=~s/^\s+//g; s/\s+$//g; $_=>$a} keys(%ARGS));
+
+################################################################################
+# Begin the main program
+################################################################################
+
+# Set defaults/validate options
+$OPTIONS{'database'} = $OPTIONS{'database'} ? $OPTIONS{'database'} : '';
+$OPTIONS{'host'} = $OPTIONS{'host'} ? $OPTIONS{'host'} : 'localhost';
+$OPTIONS{'table'} = $OPTIONS{'table'} ? $OPTIONS{'table'} : '';
+$OPTIONS{'index'} = $OPTIONS{'index'} ? $OPTIONS{'index'} : '';
+$OPTIONS{'columns'} = $OPTIONS{'columns'} ? $OPTIONS{'columns'} : '';
+$OPTIONS{'limit'} = $OPTIONS{'limit'} ? $OPTIONS{'limit'} : 1;
+$OPTIONS{'offset'} = $OPTIONS{'offset'} ? $OPTIONS{'offset'} : 0;
+
+if (!$OPTIONS{'port'}) {
+
+    if ($OPTIONS{'check'} eq 'read_connect' || 
+        $OPTIONS{'check'} eq 'read_exec') {
+        $OPTIONS{'port'} = '9998';
+    } else {
+        $OPTIONS{'port'} = '9999';
+    }
+}
+
+validate_input(\%OPTIONS, 'host', 'hostname');
+validate_input(\%OPTIONS, 'port', 'port');
+
+my $hs;
+my $res;
+# Attempt Connection
+eval {
+    local $SIG{ALRM} = sub { die 'TIMEOUT' };
+    ualarm($OPTIONS{'timeout'});
+
+    my $args = { host => $OPTIONS{'host'}, port => $OPTIONS{'port'} };
+    $hs = new Net::HandlerSocket($args);
+
+    my $res = $hs->open_index(0, $OPTIONS{'database'}, $OPTIONS{'table'},
+                              $OPTIONS{'index'}, $OPTIONS{'columns'});
+
+    if ($hs->get_error() ne 'open_table' && $hs->get_error) {
+        print "CRITICAL: Could not connect to HandlerSocket0\n";
+        print $hs->get_error() if ($OPTIONS{'verbose'} > 2);
+        exit $ERRORS{'CRITICAL'};
+    }
+
+    ualarm(0);
+};
+ualarm(0);
+
+# Check for timeout
+if ( $@ ) {
+    print "CRITICAL: Could not connect to HandlerSocket1";
+    print " in $OPTIONS{'timeout'} microseconds" if ($@ eq "TIMEOUT");
+    print "\n";
+    print $@ if ($OPTIONS{'verbose'} > 2);
+    exit $ERRORS{'CRITICAL'};
+}
+
+################################################################################
+# Begin check processing
+################################################################################
+
+my $check = $OPTIONS{'check'};
+
+# Connect check
+if ( $check eq 'read_connect' ) {
+    print "OK: HandlerSocket is accepting read connections\n";
+    exit $ERRORS{'OK'};
+}
+
+if ($check eq 'write_connect') {
+    print "OK: HandlerSocket is accepting write connections\n";
+    exit $ERRORS{'OK'};
+}
+
+eval "check_$check";
+
+################################################################################
+# Subroutines and helpers
+################################################################################
+
+# Validate user input
+sub validate_input {
+    my ($hash, $key, $type) = @_;
+
+    # Percent - positive integers 0-100 optionally ending in '%'
+    if ($type eq 'percent') {
+        $hash->{$key} =~ s/\%$//;
+        if ($hash->{$key} =~ /^(\d+)$/) {
+            $hash->{$key} = $1;
+        } else {
+            print "UNKNOWN: '$key' should contain a positive integer (in percent)\n";
+            exit $ERRORS{'UNKNOWN'};
+        }
+        unless ($hash->{$key} <= 100) {
+            print "UNKNOWN: '$key' should be within 0-100%";
+            exit $ERRORS{'UNKNOWN'};
+        }
+
+    # Seconds - positive intgers optionally ending in 's'
+    } elsif ($type eq 'seconds') {
+        $hash->{$key} =~ s/s$//;
+        if ($hash->{$key} =~ /(\d+)$/) {
+            $hash->{$key} = $1;
+        } else {
+            print "UNKNOWN: '$key' should contain a positive integer (in seconds)\n";
+            exit $ERRORS{'UNKNOWN'};
+        }
+
+    # Port - positive integers
+    } elsif ($type eq 'port') {
+        if ($hash->{$key} =~ /^(\d+)$/) {
+            $hash->{$key} = $1;
+        } else {
+            print "UNKNOWN: '$key' should contain a TCP port\n";
+            exit $ERRORS{'UNKNOWN'};
+        }
+
+    # Host - any string only containing \w, '-', '.'
+    } elsif ($type eq 'hostname') {
+        if ($hash->{$key} =~ /^([\w\-\.]+)$/) {
+            $hash->{$key} = $1;
+        } else {
+            print "UNKNOWN: '$key' should contain a valid hostname\n";
+            exit $ERRORS{'UNKNOWN'};
+        }
+
+    # Bytes - positive integers
+    } elsif ($type eq 'bytes') {
+        if ($hash->{$key} =~ /^(\d+)$/) {
+            $hash->{$key} = $1;
+        } else {
+            print "UNKNOWN: '$key' should be in bytes\n";
+            exit $ERRORS{'UNKNOWN'};
+        }
+
+    # Uh oh...
+    } else {
+        print "UNKNOWN: Internal error, unable to verify '$key'\n";
+        exit $ERRORS{'UNKNOWN'};
+    }
+}
+
+################################################################################
+# Checks
+################################################################################
+
+sub check_read_exec {
+
+    if ($OPTIONS{'database'} eq '') {
+        print "UNKNOWN: No Database Selected\n";
+        exit $ERRORS{'UNKNOWN'};
+    }
+
+    if ($OPTIONS{'table'} eq '') {
+        print "UNKNOWN: No Tables Selected\n";
+        exit $ERRORS{'UNKNOWN'};
+    }
+
+    if ($OPTIONS{'index'} eq '') {
+        print "UNKNOWN: No Index Selected\n";
+        exit $ERRORS{'UNKNOWN'};
+    }
+
+    if ($OPTIONS{'columns'} eq '') {
+        print "UNKNOWN: No Columns Selected\n";
+        exit $ERRORS{'UNKNOWN'};
+    }
+
+    eval {
+        local $SIG{ALRM} = sub { die 'TIMEOUT' };
+        ualarm($OPTIONS{'timeout'});
+
+        my $res = $hs->execute_single(0, '=', [ "$OPTIONS{'index-value'}" ], "$OPTIONS{'limit'}", "$OPTIONS{'offset'}");
+        if ($res->[0] != 0) {
+            print "CRITICAL: Could Not Read $OPTIONS{'index-value'}\n";
+            print $hs->get_error() if ($OPTIONS{'verbose'} > 2);
+            exit $ERRORS{'CRITICAL'};
+        }
+
+        shift(@$res);
+    
+        if (scalar(@$res) == 0) {
+            print "CRITICAL: No Rows Read $OPTIONS{'index-value'}\n";
+            exit $ERRORS{'CRITICAL'};
+        }
+
+    };
+    ualarm(0);
+
+    # Check for timeout
+    if ( $@ ) {
+        print "CRITICAL: Could not Read in $OPTIONS{'timeout'} seconds";
+        print " in $OPTIONS{'timeout'} microseconds" if ($@ eq "TIMEOUT");
+        print "\n";
+        print $@ if ($OPTIONS{'verbose'} > 2);
+        exit $ERRORS{'CRITICAL'};
+    }
+
+    print "OK: Read\n";
+    exit $ERRORS{'OK'};
+
+}
+
+# NOT YET IMPLEMENTD
+sub check_insert_exec {
+    eval {
+        local $SIG{ALRM} = sub { die 'TIMEOUT' };
+        ualarm($OPTIONS{'timeout'});
+
+        my $res = $hs->execute_single(0, '=', [ $OPTIONS{'index-value'} ], $OPTIONS{'limit'}, $OPTIONS{'offset'}, 'D');
+        if ($res->[0] != 0) {
+            print "CRITICAL: Could Not Delete $OPTIONS{'index-value'}\n";
+            print $hs->get_error() if ($OPTIONS{'verbose'} > 2);
+            exit $ERRORS{'CRITICAL'};
+        }
+    };
+    ualarm(0);
+
+    # Check for timeout
+    if ( $@ ) {
+        print "CRITICAL: Could not get() in $OPTIONS{'timeout'} seconds";
+        print " in $OPTIONS{'timeout'} microseconds" if ($@ eq "TIMEOUT");
+        print "\n";
+        print $@ if ($OPTIONS{'verbose'} > 2);
+        exit $ERRORS{'CRITICAL'};
+    }
+
+    print "OK: insert\n";
+    exit $ERRORS{'OK'};
+}
+
+# NOT IMPLEMENTED
+sub check_update_exec {
+    eval {
+        local $SIG{ALRM} = sub { die 'TIMEOUT' };
+        ualarm($OPTIONS{'timeout'});
+
+        my $res = $hs->execute_single(0, '=', [ $OPTIONS{'index-value'} ], $OPTIONS{'limit'}, $OPTIONS{'offset'}, 'U');
+        if ($res->[0] != 0) {
+            print "CRITICAL: Could Not Update $OPTIONS{'index-value'}\n";
+            print $hs->get_error() if ($OPTIONS{'verbose'} > 2);
+            exit $ERRORS{'CRITICAL'};
+        }
+    };
+    ualarm(0);
+
+    # Check for timeout
+    if ( $@ ) {
+        print "CRITICAL: Could not get() in $OPTIONS{'timeout'} seconds";
+        print " in $OPTIONS{'timeout'} microseconds" if ($@ eq "TIMEOUT");
+        print "\n";
+        print $@ if ($OPTIONS{'verbose'} > 2);
+        exit $ERRORS{'CRITICAL'};
+    }
+
+    print "OK: Update\n";
+    exit $ERRORS{'OK'};
+}
+
+sub check_delete_exec {
+    eval {
+        local $SIG{ALRM} = sub { die 'TIMEOUT' };
+        ualarm($OPTIONS{'timeout'});
+
+        my $res = $hs->execute_single(0, '=', [ $OPTIONS{'index-value'} ], $OPTIONS{'limit'}, $OPTIONS{'offset'}, 'D');
+
+        if ($res->[0] != 0) {
+            print "CRITICAL: Could Not Delete $OPTIONS{'index-value'}\n";
+            print $hs->get_error() if ($OPTIONS{'verbose'} > 2);
+            exit $ERRORS{'CRITICAL'};
+        }
+
+        if ($res->[1] == 0) {
+            print "CRITICAL: No Rows Deleted ($OPTIONS{'index-value'})\n";
+            exit $ERRORS{'CRITICAL'};
+        };
+    };
+    ualarm(0);
+
+    # Check for timeout
+    if ( $@ ) {
+        print "CRITICAL: Could not get() in $OPTIONS{'timeout'} seconds";
+        print " in $OPTIONS{'timeout'} microseconds" if ($@ eq "TIMEOUT");
+        print "\n";
+        print $@ if ($OPTIONS{'verbose'} > 2);
+        print $hs->get_error() if ($OPTIONS{'verbose'} > 2);
+        exit $ERRORS{'CRITICAL'};
+    }
+
+    print "OK: Delete\n";
+    exit $ERRORS{'OK'};
+}
+
+=pod
+
+=head1 NAME
+
+check_handlersocket - Nagios checks for HandlerSocket
+
+=head1 SYNOPSIS
+
+ check_handlersocket -K <check_name> [options]
+
+ Options:
+   -K, --check=<check_name>  The check to run
+   --columns=<columns>       Comma-separated list of column names
+   -c, --critical=<limit>    The level at which a critical alarm is raised.
+   -d, --database=<dbname>   The database to use
+   -h, --help                Display this message and exit
+   -H, --host=<hostname>     The target server host
+   --index                   The name of the index to open
+   --index-value             The key to find
+   --limit                   The maximum number of records to retrieve
+   --offset                  The number of records skipped before retrieving records
+   --port=<portnum>          The port HandlerSocket is listening on
+   --table                   The table to use
+   -t, --timeout=<timeout>   Seconds before connection/query attempts timeout
+   -v, --verbose             Increase verbosity level
+   -V, --version             Display version information and exit
+   -w, --warning             The level at which a warning is raised.
+
+ Defaults are:
+
+ ATTRIBUTE                  VALUE
+ -------------------------- -------------------------------
+ check                      No default value
+ columns                    No default value 
+ critical                   Check-specific
+ database                   No default value
+ help                       FALSE
+ host                       localhost
+ index                      No default value
+ index-value                No default value
+ limit                      1
+ offset                     0
+ port                       9998 for reads, 9999 for writes
+ socket                     No default value
+ table                      No default value
+ timeout                    10 seconds
+ verbose                    1 (out of 3)
+ version                    FALSE
+ warning                    Check-specific
+
+ The following checks are supported:
+
+ read_connect write_connect read_exec delete_exec
+
+=head1 OPTIONS
+
+=over
+
+=item I<--check>|I<-K>
+
+The check to run, see L<CHECKS> section for details. Only one check may be 
+specified at a time.
+
+=item I<--columns>
+
+Comma-separated list of column names. Required for anything more than
+connection checks.
+
+=item I<--critical>|I<-c>
+
+The level at which a critical alarm is raised. Check-specific.
+
+=item I<--database>|I<-d>
+
+The database to use. No default value, will connect without a database if 
+not specified.
+
+=item I<--help>|I<-h>
+
+Display a short help message and exit.
+
+=item I<--host>|I<-H>
+
+The target server host.
+
+=item I<--index>
+
+The name of the index to open
+
+=item I<--index-value>
+
+The key to find
+
+=item I<--limit>
+
+The maximum number of records to retrieve
+
+=item I<--offset>
+
+The number of records skipped before retrieving records
+
+=item I<--port>
+
+The port HandlerSocket is listening on.
+
+=item I<--table>
+
+The table to use 
+
+=item I<--timeout>|I<-t>
+
+Seconds before connection/query attempts timeout. Note that this does B<NOT>
+mean that the whole plugin will timeout in this interval, just the initial
+connection and each subsequent db query. Each check has also has
+a separate timeout for the test query in case a different timeout is desired.
+
+=item I<--verbose>|I<-v>
+
+Increase verbosity level. Can be used up to three times.
+
+=item I<--version>|I<-V>
+
+Display version information and exit.
+
+=item I<--warning>|I<-w>
+
+The level at which a warning is raised.  Check-specific.
+
+=back
+
+=head1 CHECKS
+
+=over
+
+=item B<read_connect>
+
+Checks connectivity to the target HandlerSocket server.
+Returns CRITICAL if not able to connect, OK otherwise.
+    I<--warning> => ignored
+    I<--critical> => ignored
+
+=item B<write_connect>
+
+Checks connectivity to the target HandlerSocket server.
+Returns CRITICAL if not able to connect, OK otherwise.
+    I<--warning> => ignored
+    I<--critical> => ignored
+
+=item B<read_exec>
+
+Executes a read operation against a given index.
+Returns OK if a result was returned, CRITICAL otherwise.
+ 
+=item B<delete_exec>
+
+Deletes the target row(s). Returns OK if successful, 
+CRITICAL otherwise.
+
+=back
+
+=head1 SYSTEM REQUIREMENTS
+
+check_handlersocket requires the following Perl modules:
+
+  Pod::Usage
+  Getopt::Long
+  Net::HandlerSocket
+
+=head1 BUGS
+
+Please report all bugs and feature requests to 
+http://code.google.com/p/check-mysql-all
+
+=head1 LICENSE
+
+This program is copyright (c) 2009 Ryan Lowe.
+Feedback and improvements are welcome (ryan.a.lowe@percona.com).
+
+THIS PROGRAM IS PROVIDED "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED
+WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
+MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+
+This program is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 2; OR the Perl Artistic License.  On UNIX and similar
+systems, you can issue `man perlgpl' or `man perlartistic' to read these
+licenses.
+
+You should have received a copy of the GNU General Public License along with
+this program; if not, write to the Free Software Foundation, Inc., 59 Temple
+Place, Suite 330, Boston, MA  02111-1307 USA.
+
+=head1 AUTHOR
+
+Ryan Lowe (ryan.a.lowe@percona.com)
+
+=head1 VERSION
+
+This manual page documents 0.0.1 of check_handlersocket
+
+=cut
+
