@@ -56,10 +56,15 @@ $opts{critical} = $opts{critical} ? $opts{critical} : 99;
  
 my $total_memory = `/bin/cat /proc/meminfo |/bin/grep -i MemTotal | /bin/awk {'print \$2'}`;
 my $free_memory  = `/bin/cat /proc/meminfo |/bin/grep -i MemFree  | /bin/awk {'print \$2'}`;
+my $buffers  = `/bin/cat /proc/meminfo |/bin/grep -i Buffers  | /bin/awk {'print \$2'}`;
+my $cached  = `/bin/cat /proc/meminfo |/bin/egrep -i '^Cached'  | /bin/awk {'print \$2'}`;
 chomp($total_memory);
 chomp($free_memory);
-my $pct_used     = int(100 - ((($free_memory / $total_memory) * 100) - 0.5));
- 
+chomp($buffers);
+chomp($cached);
+#my $pct_used     = int(100 - ((($free_memory / $total_memory) * 100) - 0.5));
+my $pct_used     = int(100 - (((($free_memory + $buffers + $cached) / $total_memory) * 100) - 0.5));
+
 if ($pct_used >= $opts{critical}) {
     print "CRITICAL: $pct_used% memory used\n";
     exit $ERRORS{'CRITICAL'};
