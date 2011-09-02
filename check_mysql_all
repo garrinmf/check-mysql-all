@@ -560,6 +560,8 @@ sub check_table_status {
             $_ = $tables_status->{$db}{$table}{'Comment'};
             if (/marked as crashed/) {
                 push(@errs, "$db.$table marked as crashed");
+            } elsif (/VIEW/i) {
+                next;
             } elsif (/(err(?:code|no):\s\d+)/i) {
                 push(@errs, "$db.$table has an error ($1)");
             } elsif (! defined($tables_status->{$db}{$table}{'Rows'}) && $tables_status->{$db}{$table}{'Comment'} ne 'VIEW') {
