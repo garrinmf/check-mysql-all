@@ -1,0 +1,234 @@
+#!/usr/bin/perl 
+
+# DO NOT USE EMBEDDED PERL
+# nagios: -epn
+
+################################################################################
+# check_pt_heartbeat - Nagios Plug-In for pt-heartbeat checks.
+#
+# @author  Ryan Lowe <ryan.a.lowe@gmail.com>
+# @date    2012-01-05
+# @license GPL v2
+#
+################################################################################
+
+use strict;
+use warnings FATAL => 'all';
+use Pod::Usage;
+use Getopt::Long;
+
+my $VERSION = '0.0.1';
+                
+################################################################################
+# Get configuration information
+################################################################################
+
+my %OPTIONS;
+
+# Parse command line opts
+my $gop=new Getopt::Long::Parser;
+$gop->configure('no_ignore_case','bundling');
+if (!$gop->getoptions(
+    'cnf=s'        => \$OPTIONS{'cnf'     },
+    'critical|c=s' => \$OPTIONS{'critical'},
+    'database|d=s' => \$OPTIONS{'database'},
+    'help|h'       => \$OPTIONS{'help'    },
+    'hostname|H=s' => \$OPTIONS{'host'    },
+    'password|p=s' => \$OPTIONS{'password'},
+    'port=i'       => \$OPTIONS{'port'    },
+    'socket|s=s'   => \$OPTIONS{'socket'  },
+    'table=s'      => \$OPTIONS{'table'   },
+    'username|u=s' => \$OPTIONS{'user'    },
+    'value=s'      => \$OPTIONS{'value'   },
+    'version|V'    => \$OPTIONS{'version' },
+    'warning|w=s'  => \$OPTIONS{'warning' } ) ) {
+
+    pod2usage(2);
+}
+
+# Help if asked for or no check given
+pod2usage(2) if     ($OPTIONS{'help'});
+
+# Yay for versions
+if ($OPTIONS{'version'}) {
+    print "$VERSION\n";
+    exit 0;
+}
+
+################################################################################
+# Begin the main program
+################################################################################
+
+# Set defaults/validate options
+$OPTIONS{'host'}     = $OPTIONS{'host'}     ? $OPTIONS{'host'}     : 'localhost';
+$OPTIONS{'port'}     = $OPTIONS{'port'}     ? $OPTIONS{'port'}     : '3306';
+$OPTIONS{'database'} = $OPTIONS{'database'} ? $OPTIONS{'database'} : 'percona'; 
+$OPTIONS{'table'}    = $OPTIONS{'table'}    ? $OPTIONS{'table'}    : 'heartbeat';
+
+if (!`which pt-heartbeat`) {
+    print "CRITICAL: Could not find pt-heartbeat executable\n";
+    exit 3;
+}
+
+# Build the command
+my $command = 'pt-heartbeat ';
+$command .= "--host $OPTIONS{'host'} ";
+$command .= "--database $OPTIONS{'database'} ";
+$command .= "--table $OPTIONS{'table'} ";
+$command .= "--user $OPTIONS{'user'} ";
+$command .= "--password $OPTIONS{'password'} ";
+$command .= "--check";
+
+my $result = `$command`;
+chomp($result);
+
+if ($result < 1) {
+    print "OK: $result seconds behind master\n";
+    exit 0; # OK
+} elsif ($result < 2) {
+    print "WARNING: $result seconds behind master\n";
+    exit 1; # WARNING
+} elsif ($result < 3) {
+    print "CRITICAL: $result seconds behind master\n";
+    exit 2; # CRITICAL
+} else {
+    print "UNKNOWN: Unable to parse output\n";
+    exit 4; # UNKNOWN
+}
+ 
+=pod
+
+=head1 NAME
+
+check_pt_heartbeat - Nagios checks for pt-heartbeat
+
+=head1 SYNOPSIS
+
+ check_pt_heartbeat [options]
+
+ Options:
+   --cnf=<config file>       Optional my.cnf to read username/pass/etc
+   -c, --critical=<limit>    The level at which a critical alarm is raised.
+   -d, --database=<dbname>   The database to use
+   -h, --help                Display this message and exit
+   -H, --host=<hostname>     The target MySQL server host
+   -p, --password=<password> The password of the MySQL user
+   --port=<portnum>          The port MySQL is listening on
+   -s, --socket=<sockfile>   Use the specified mysql unix socket to connect
+   --table=<table>           The table to use
+   -u, --username=<username> The MySQL user used to connect
+   -V, --version             Display version information and exit
+   -w, --warning             The level at which a warning is raised.
+
+ Defaults are:
+
+ ATTRIBUTE                  VALUE
+ -------------------------- ------------------
+ cnf                        No default value
+ critical                   60
+ database                   percona   
+ help                       FALSE
+ host                       localhost
+ password                   No default value
+ port                       3306
+ socket                     No default value
+ table                      heartbeat
+ username                   No default value
+ version                    FALSE
+ warning                    30
+
+=head1 OPTIONS
+
+=over
+
+=item I<--cnf>
+
+An optional my.cnf to read for username/password.  Reads the [client] section
+
+=item I<--critical>|I<-c>
+
+The level at which a critical alarm is raised. Default 60 seconds.
+
+=item I<--database>|I<-d>
+
+The database to use. Default 'percona'.
+
+=item I<--help>|I<-h>
+
+Display a short help message and exit.
+
+=item I<--host>|I<-H>
+
+The target MySQL server host.
+
+=item I<--password>|I<-p>
+
+The password of the MySQL user.
+
+=item I<--port>
+
+The port MySQL is listening on.
+
+=item I<--socket>|I<-s>
+
+Use the specified unix socket to connect with. Ignored if --host is specified 
+or is anything except 'localhost'.
+
+=item I<--table>
+
+The table pt-heartbeat uses.  Default 'heartbeat'.
+
+=item I<--username>|I<-u>
+
+The MySQL user used to connect
+
+=item I<--version>|I<-V>
+
+Display version information and exit.
+
+=item I<--warning>|I<-w>
+
+The level at which a warning is raised.  Default 30 seconds.
+
+=back
+
+=head1 SYSTEM REQUIREMENTS
+
+check_pt_heartbeat requires the following Perl modules:
+
+  Pod::Usage
+  Getopt::Long
+
+=head1 BUGS
+
+Please report all bugs and feature requests to 
+http://code.google.com/p/check-mysql-all
+
+=head1 LICENSE
+
+This program is copyright (c) 2009 Ryan Lowe.
+Feedback and improvements are welcome (ryan.a.lowe@gmail.com).
+
+THIS PROGRAM IS PROVIDED "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED
+WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
+MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+
+This program is free software; you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 2; OR the Perl Artistic License.  On UNIX and similar
+systems, you can issue `man perlgpl' or `man perlartistic' to read these
+licenses.
+
+You should have received a copy of the GNU General Public License along with
+this program; if not, write to the Free Software Foundation, Inc., 59 Temple
+Place, Suite 330, Boston, MA  02111-1307 USA.
+
+=head1 AUTHOR
+
+Ryan Lowe (ryan.a.lowe@gmail.com)
+
+=head1 VERSION
+
+This manual page documents 0.0.1 of check_pt_heartbeat
+
+=cut
