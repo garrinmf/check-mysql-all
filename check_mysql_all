@@ -6,7 +6,7 @@
 ################################################################################
 # check_mysql_all - Nagios Plug-In for typical MySQL checks. 4.0+
 #
-# @author  Ryan Lowe <ryan.a.lowe@percona.com>
+# @author  Ryan Lowe <rlowe@pablowe.net>
 # @date    2009-03-06
 # @license GPL v2
 ################################################################################
@@ -91,6 +91,8 @@ validate_input(\%OPTIONS, 'timeout', 'seconds');
 # Set db defaults/validate options
 $OPTIONS{'host'} = $OPTIONS{'host'} ? $OPTIONS{'host'} : 'localhost';
 $OPTIONS{'port'} = $OPTIONS{'port'} ? $OPTIONS{'port'} : '3306';
+$OPTIONS{'cnf'}  = $OPTIONS{'cnf'}  ? $OPTIONS{'cnf'}  : '/etc/my.cnf';
+
 validate_input(\%OPTIONS, 'host', 'hostname');
 validate_input(\%OPTIONS, 'port', 'port');
 
@@ -701,7 +703,7 @@ check_mysql_all - Nagios checks for 4.0+ versions of MySQL
  -------------------------- ------------------
  args                       No default value
  check                      No default value
- cnf                        No default value
+ cnf                        /etc/my.cnf
  critical                   Check-specific
  database                   No default value
  help                       FALSE
@@ -914,7 +916,7 @@ http://code.google.com/p/check-mysql-all
 =head1 LICENSE
 
 This program is copyright (c) 2009 Ryan Lowe.
-Feedback and improvements are welcome (ryan.a.lowe@percona.com).
+Feedback and improvements are welcome (rlowe@pablowe.net).
 
 THIS PROGRAM IS PROVIDED "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED
 WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
@@ -932,7 +934,7 @@ Place, Suite 330, Boston, MA  02111-1307 USA.
 
 =head1 AUTHOR
 
-Ryan Lowe (ryan.a.lowe@percona.com)
+Ryan Lowe (rlowe@pablowe.net)
 
 =head1 VERSION
 
