@@ -23,7 +23,7 @@ use lib "/usr/lib64/nagios/plugins";
 use utils qw(%ERRORS);
 
 my $VERSION = '0.0.9';
-my @CHECKS = qw(mk-deadlock-logger);
+my @CHECKS = qw(mk-deadlock-logger mk-heartbeat);
 my %OPTIONS;
 my %ARGS;
 
@@ -305,11 +305,22 @@ SELECT ROUND(COUNT(*)/2) AS deadlock_cnt
 sub mk_heartbeat {
     my ($dbh, $opts, $args, $processlist, $variables, $status, $dbs) = @_;
 
-    my @records = `env mk-heartbeat --check -h $OPTIONS{'hostname'} -u $OPTIONS{'username'} -p $OPTIONS{'password'} -D $OPTIONS{'database'} -t $OPTIONS{'table'} --recurse $args->{'recurse'}`;
+    my @records = `env mk-heartbeat --check -h $OPTIONS{'host'} -u $OPTIONS{'user'} -p $OPTIONS{'password'} -D $OPTIONS{'database'}`;
 
-    use Data::Dumper;
-    print Dumper(\@records);
+    my $repl_delay = $records[0];
 
+    chomp($repl_delay);
+
+    if($repl_delay >= $OPTIONS{'critical'}) {
+	print "CRITICAL: Slave is $repl_delay seconds behind master\n";
+	exit $ERRORS{'CRITICAL'};
+    } elsif ($repl_delay >= $OPTIONS{'warning'}) {
+	print "WARNING: Slave is $repl_delay seconds behind master\n";
+	exit $ERRORS{'WARNING'};	
+    } 
+
+    print "OK: Slave is $repl_delay seconds behind master\n";
+    exit $ERRORS{'OK'};
 }
 
 =pod
